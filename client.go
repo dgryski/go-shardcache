@@ -119,7 +119,7 @@ func (c *Client) Set(key, value []byte, expire uint32) error {
 	return nil
 }
 
-func (c *Client) Del(key []byte) error {
+func (c *Client) Del(key []byte, evict bool) error {
 
 	var bufw = &bytes.Buffer{}
 
@@ -127,7 +127,14 @@ func (c *Client) Del(key []byte) error {
 
 	w := io.MultiWriter(bufw, sig)
 
-	w.Write([]byte{MSG_DEL})
+	var cmd byte
+	if evict {
+		cmd = MSG_EVI
+	} else {
+		cmd = MSG_DEL
+	}
+
+	w.Write([]byte{cmd})
 	writeRecord(w, key)
 	w.Write([]byte{MSG_EOM})
 
