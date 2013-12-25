@@ -45,7 +45,7 @@ func New(host string, auth []byte) *Client {
 	}
 }
 
-func (c *Client) Get(key []byte) ([]byte, error) {
+func (c *Client) send(msg byte, args ...[]byte) error {
 
 	var bufw = &bytes.Buffer{}
 
@@ -53,14 +53,36 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 
 	w := io.MultiWriter(bufw, sig)
 
-	w.Write([]byte{MSG_GET})
-	writeRecord(w, key)
+	w.Write([]byte{msg})
+
+	needSep := false
+
+	for _, a := range args {
+		if needSep {
+			w.Write([]byte{MSG_RSEP})
+		}
+		writeRecord(w, a)
+		needSep = true
+	}
 	w.Write([]byte{MSG_EOM})
 
 	bufw.Write(sig.Sum(nil))
-	c.conn.Write(bufw.Bytes())
+	n, err := c.conn.Write(bufw.Bytes())
 
-	sig.Reset()
+	if err != nil {
+		return err
+	}
+
+	if n != bufw.Len() {
+		return fmt.Errorf("failed to write to socket: only %d/%d bytes written", n, bufw.Len())
+	}
+
+	return nil
+}
+
+func (c *Client) readResponse(msg byte) ([]byte, error) {
+
+	sig := siphash.New(c.auth)
 
 	r := io.TeeReader(c.conn, sig)
 
@@ -70,11 +92,11 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	if l[0] != MSG_RES {
+	if l[0] != msg {
 		return nil, errors.New("bad response byte")
 	}
 
-	record, err := readRecord(r)
+	response, err := readRecord(r)
 	if err != nil {
 		return nil, fmt.Errorf("readRecord: %s", err)
 
@@ -94,61 +116,48 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 		return nil, errors.New("bad signature")
 	}
 
-	return record, nil
+	return response, nil
+}
+
+func (c *Client) Get(key []byte) ([]byte, error) {
+
+	err := c.send(MSG_GET, key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := c.readResponse(MSG_RES)
+
+	return response, nil
 }
 
 func (c *Client) Set(key, value []byte, expire uint32) error {
 
-	var bufw = &bytes.Buffer{}
+	var err error
 
-	sig := siphash.New(c.auth)
-
-	w := io.MultiWriter(bufw, sig)
-
-	w.Write([]byte{MSG_SET})
-	writeRecord(w, key)
-	w.Write([]byte{MSG_RSEP})
-	writeRecord(w, value)
-
-	if expire != 0 {
-		var l [4]byte
-		binary.BigEndian.PutUint32(l[:], expire)
-		w.Write([]byte{MSG_RSEP})
-		writeRecord(w, l[:])
+	if expire == 0 {
+		err = c.send(MSG_SET, key, value)
+	} else {
+		var expBytes [4]byte
+		binary.BigEndian.PutUint32(expBytes[:], expire)
+		err = c.send(MSG_SET, key, value, expBytes[:])
 	}
 
-	w.Write([]byte{MSG_EOM})
-
-	bufw.Write(sig.Sum(nil))
-
-	c.conn.Write(bufw.Bytes())
-
-	return nil
+	return err
 }
 
 func (c *Client) Del(key []byte, evict bool) error {
 
-	var bufw = &bytes.Buffer{}
+	var err error
 
-	sig := siphash.New(c.auth)
-
-	w := io.MultiWriter(bufw, sig)
-
-	var cmd byte
 	if evict {
-		cmd = MSG_EVI
+		err = c.send(MSG_EVI, key)
 	} else {
-		cmd = MSG_DEL
+		err = c.send(MSG_DEL, key)
 	}
 
-	w.Write([]byte{cmd})
-	writeRecord(w, key)
-	w.Write([]byte{MSG_EOM})
-
-	bufw.Write(sig.Sum(nil))
-	c.conn.Write(bufw.Bytes())
-
-	return nil
+	return err
 }
 
 type DirEntry struct {
@@ -158,51 +167,14 @@ type DirEntry struct {
 
 func (c *Client) Index() ([]DirEntry, error) {
 
-	var bufw = &bytes.Buffer{}
-
-	sig := siphash.New(c.auth)
-
-	w := io.MultiWriter(bufw, sig)
-
-	w.Write([]byte{MSG_IDG})
-	writeRecord(w, nil)
-	w.Write([]byte{MSG_EOM})
-
-	bufw.Write(sig.Sum(nil))
-	c.conn.Write(bufw.Bytes())
-
-	sig.Reset()
-
-	r := io.TeeReader(c.conn, sig)
-
-	var l [8]byte
-	n, err := r.Read(l[:1])
-	if n != 1 || err != nil {
+	err := c.send(MSG_IDG, nil)
+	if err != nil {
 		return nil, err
 	}
 
-	if l[0] != MSG_IDR {
-		return nil, errors.New("bad response byte")
-	}
-
-	idxBuf, err := readRecord(r)
+	idxBuf, err := c.readResponse(MSG_IDR)
 	if err != nil {
-		return nil, fmt.Errorf("readRecord: %s", err)
-
-	}
-
-	r.Read(l[:1])
-	if l[0] != MSG_EOM {
-		return nil, errors.New("bad EOM")
-	}
-
-	// read signature
-	c.conn.Read(l[:])
-
-	sum := sig.Sum(nil)
-
-	if !hmac.Equal(sum, l[:]) {
-		return nil, errors.New("bad signature")
+		return nil, err
 	}
 
 	var index []DirEntry
@@ -227,54 +199,11 @@ func (c *Client) Index() ([]DirEntry, error) {
 
 func (c *Client) Stats() ([]byte, error) {
 
-	var bufw = &bytes.Buffer{}
+	c.send(MSG_STS, nil)
 
-	sig := siphash.New(c.auth)
+	response, err := c.readResponse(MSG_RES)
 
-	w := io.MultiWriter(bufw, sig)
-
-	w.Write([]byte{MSG_STS})
-	writeRecord(w, nil)
-	w.Write([]byte{MSG_EOM})
-
-	bufw.Write(sig.Sum(nil))
-	c.conn.Write(bufw.Bytes())
-
-	sig.Reset()
-
-	r := io.TeeReader(c.conn, sig)
-
-	var l [8]byte
-	n, err := r.Read(l[:1])
-	if n != 1 || err != nil {
-		return nil, err
-	}
-
-	if l[0] != MSG_RES {
-		return nil, errors.New("bad response byte")
-	}
-
-	record, err := readRecord(r)
-	if err != nil {
-		return nil, fmt.Errorf("readRecord: %s", err)
-
-	}
-
-	r.Read(l[:1])
-	if l[0] != MSG_EOM {
-		return nil, errors.New("bad EOM")
-	}
-
-	// read signature
-	c.conn.Read(l[:])
-
-	sum := sig.Sum(nil)
-
-	if !hmac.Equal(sum, l[:]) {
-		return nil, errors.New("bad signature")
-	}
-
-	return record, nil
+	return response, err
 }
 
 func writeRecord(w io.Writer, record []byte) {
