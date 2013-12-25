@@ -129,7 +129,7 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 
 	response, err := c.readResponse(MSG_RES)
 
-	return response, nil
+	return response, err
 }
 
 func (c *Client) Set(key, value []byte, expire uint32) error {
