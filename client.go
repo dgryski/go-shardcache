@@ -14,13 +14,20 @@ import (
 )
 
 const (
-	MSG_GET  byte = 0x01
-	MSG_SET       = 0x02
-	MSG_DEL       = 0x03
-	MSG_EVI       = 0x04
-	MSG_EOM       = 0x00
-	MSG_RSEP      = 0x80
-	MSG_RES       = 0x99
+	MSG_GET byte = 0x01
+	MSG_SET      = 0x02
+	MSG_DEL      = 0x03
+	MSG_EVI      = 0x04
+
+	MSG_CHK = 0x31
+	MSG_STS = 0x32
+
+	MSG_IDG = 0x41
+	MSG_IDR = 0x42
+
+	MSG_EOM  = 0x00
+	MSG_RSEP = 0x80
+	MSG_RES  = 0x99
 )
 
 type Client struct {
@@ -142,6 +149,132 @@ func (c *Client) Del(key []byte, evict bool) error {
 	c.conn.Write(bufw.Bytes())
 
 	return nil
+}
+
+type DirEntry struct {
+	Key       []byte
+	ValueSize int
+}
+
+func (c *Client) Index() ([]DirEntry, error) {
+
+	var bufw = &bytes.Buffer{}
+
+	sig := siphash.New(c.auth)
+
+	w := io.MultiWriter(bufw, sig)
+
+	w.Write([]byte{MSG_IDG})
+	writeRecord(w, nil)
+	w.Write([]byte{MSG_EOM})
+
+	bufw.Write(sig.Sum(nil))
+	c.conn.Write(bufw.Bytes())
+
+	sig.Reset()
+
+	r := io.TeeReader(c.conn, sig)
+
+	var l [8]byte
+	n, err := r.Read(l[:1])
+	if n != 1 || err != nil {
+		return nil, err
+	}
+
+	if l[0] != MSG_IDR {
+		return nil, errors.New("bad response byte")
+	}
+
+	idxBuf, err := readRecord(r)
+	if err != nil {
+		return nil, fmt.Errorf("readRecord: %s", err)
+
+	}
+
+	r.Read(l[:1])
+	if l[0] != MSG_EOM {
+		return nil, errors.New("bad EOM")
+	}
+
+	// read signature
+	c.conn.Read(l[:])
+
+	sum := sig.Sum(nil)
+
+	if !hmac.Equal(sum, l[:]) {
+		return nil, errors.New("bad signature")
+	}
+
+	var index []DirEntry
+
+	// extract data from index buffer
+	for len(idxBuf) > 0 {
+		klen := binary.BigEndian.Uint32(idxBuf)
+		if klen == 0 {
+			break
+		}
+		idxBuf = idxBuf[4:]
+		key := make([]byte, klen)
+		copy(key, idxBuf)
+		idxBuf = idxBuf[klen:]
+		vlen := binary.BigEndian.Uint32(idxBuf)
+		idxBuf = idxBuf[4:]
+		index = append(index, DirEntry{Key: key, ValueSize: int(vlen)})
+	}
+
+	return index, nil
+}
+
+func (c *Client) Stats() ([]byte, error) {
+
+	var bufw = &bytes.Buffer{}
+
+	sig := siphash.New(c.auth)
+
+	w := io.MultiWriter(bufw, sig)
+
+	w.Write([]byte{MSG_STS})
+	writeRecord(w, nil)
+	w.Write([]byte{MSG_EOM})
+
+	bufw.Write(sig.Sum(nil))
+	c.conn.Write(bufw.Bytes())
+
+	sig.Reset()
+
+	r := io.TeeReader(c.conn, sig)
+
+	var l [8]byte
+	n, err := r.Read(l[:1])
+	if n != 1 || err != nil {
+		return nil, err
+	}
+
+	if l[0] != MSG_RES {
+		return nil, errors.New("bad response byte")
+	}
+
+	record, err := readRecord(r)
+	if err != nil {
+		return nil, fmt.Errorf("readRecord: %s", err)
+
+	}
+
+	r.Read(l[:1])
+	if l[0] != MSG_EOM {
+		return nil, errors.New("bad EOM")
+	}
+
+	// read signature
+	c.conn.Read(l[:])
+
+	sum := sig.Sum(nil)
+
+	if !hmac.Equal(sum, l[:]) {
+		return nil, errors.New("bad signature")
+	}
+
+	return record, nil
 }
 
 func writeRecord(w io.Writer, record []byte) {

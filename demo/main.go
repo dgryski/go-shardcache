@@ -52,6 +52,23 @@ func main() {
 			log.Fatal("error reading", fname, ":", err)
 		}
 		client.Set([]byte(arg), f, 0)
+
+	case "stats":
+		r, err := client.Stats()
+		if err != nil {
+			log.Fatal("error getting stats: ", err)
+		}
+		os.Stdout.Write(r)
+
+	case "index":
+		idx, err := client.Index()
+		if err != nil {
+			log.Fatal("error getting index: ", err)
+		}
+		for _, entry := range idx {
+			log.Printf("%s %d\n", entry.Key, entry.ValueSize)
+		}
+
 	default:
 		log.Fatal("unknown command: ", cmd)
 	}
