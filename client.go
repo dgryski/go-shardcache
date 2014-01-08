@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"math"
 	"net"
@@ -46,11 +47,20 @@ func New(host string, auth []byte) *Client {
 
 func (c *Client) send(msg byte, args ...[]byte) error {
 
-	sig := siphash.New(c.auth)
+	var w io.Writer
+	var sig hash.Hash
 
-	w := io.MultiWriter(c.conn, sig)
+	if c.auth != nil {
+		sig = siphash.New(c.auth)
+		w = io.MultiWriter(c.conn, sig)
+	} else {
+		w = c.conn
+	}
 
-	w.Write([]byte{msg})
+	_, err := w.Write([]byte{msg})
+	if err != nil {
+		return err
+	}
 
 	needSep := false
 
@@ -61,18 +71,32 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 		writeRecord(w, a)
 		needSep = true
 	}
-	w.Write([]byte{MSG_EOM})
 
-	_, err := c.conn.Write(sig.Sum(nil))
+	_, err = w.Write([]byte{MSG_EOM})
+
+	if err != nil {
+		return err
+	}
+
+	if c.auth != nil {
+		_, err = c.conn.Write(sig.Sum(nil))
+	}
 
 	return err
 }
 
 func (c *Client) readResponse(msg byte) ([]byte, error) {
 
-	sig := siphash.New(c.auth)
+	var sig hash.Hash
 
-	r := io.TeeReader(c.conn, sig)
+	var r io.Reader
+
+	if c.auth != nil {
+		sig = siphash.New(c.auth)
+		r = io.TeeReader(c.conn, sig)
+	} else {
+		r = c.conn
+	}
 
 	var l [8]byte
 	n, err := r.Read(l[:1])
@@ -87,7 +111,6 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 	response, err := readRecord(r)
 	if err != nil {
 		return nil, fmt.Errorf("readRecord: %s", err)
-
 	}
 
 	r.Read(l[:1])
@@ -95,13 +118,14 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 		return nil, errors.New("bad EOM")
 	}
 
-	// read signature
-	c.conn.Read(l[:])
+	if c.auth != nil {
+		// read signature
+		c.conn.Read(l[:])
+		sum := sig.Sum(nil)
 
-	sum := sig.Sum(nil)
-
-	if !hmac.Equal(sum, l[:]) {
-		return nil, errors.New("bad signature")
+		if !hmac.Equal(sum, l[:]) {
+			return nil, errors.New("bad signature")
+		}
 	}
 
 	return response, nil
@@ -130,6 +154,12 @@ func (c *Client) Set(key, value []byte, expire uint32) error {
 		var expBytes [4]byte
 		binary.BigEndian.PutUint32(expBytes[:], expire)
 		err = c.send(MSG_SET, key, value, expBytes[:])
+	}
+
+	response, err := c.readResponse(MSG_RES)
+
+	if len(response) != 2 || response[0] != 'O' || response[1] != 'K' {
+		return errors.New("bad set response")
 	}
 
 	return err

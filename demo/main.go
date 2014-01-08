@@ -12,13 +12,17 @@ import (
 func main() {
 
 	host := flag.String("h", "localhost:8080", "shardcache host")
-	secret := flag.String("auth", "default", "shardcache auth secret")
+	secret := flag.String("auth", "", "shardcache auth secret")
 	flag.Parse()
 
-	var auth [16]byte
-	copy(auth[:], *secret)
+	var auth []byte
 
-	client := shardcache.New(*host, auth[:])
+	if *secret != "" {
+		auth = make([]byte, 16)
+		copy(auth[:], *secret)
+	}
+
+	client := shardcache.New(*host, auth)
 
 	cmd := flag.Arg(0)
 	switch cmd {
