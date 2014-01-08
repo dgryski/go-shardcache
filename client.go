@@ -1,7 +1,6 @@
 package shardcache
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"encoding/binary"
 	"errors"
@@ -47,11 +46,9 @@ func New(host string, auth []byte) *Client {
 
 func (c *Client) send(msg byte, args ...[]byte) error {
 
-	var bufw = &bytes.Buffer{}
-
 	sig := siphash.New(c.auth)
 
-	w := io.MultiWriter(bufw, sig)
+	w := io.MultiWriter(c.conn, sig)
 
 	w.Write([]byte{msg})
 
@@ -66,18 +63,9 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 	}
 	w.Write([]byte{MSG_EOM})
 
-	bufw.Write(sig.Sum(nil))
-	n, err := c.conn.Write(bufw.Bytes())
+	_, err := c.conn.Write(sig.Sum(nil))
 
-	if err != nil {
-		return err
-	}
-
-	if n != bufw.Len() {
-		return fmt.Errorf("failed to write to socket: only %d/%d bytes written", n, bufw.Len())
-	}
-
-	return nil
+	return err
 }
 
 func (c *Client) readResponse(msg byte) ([]byte, error) {
