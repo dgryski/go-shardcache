@@ -28,6 +28,8 @@ const (
 	MSG_EOM  = 0x00
 	MSG_RSEP = 0x80
 	MSG_RES  = 0x99
+
+	SIG_HDR = 0xF0
 )
 
 type Client struct {
@@ -52,6 +54,7 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	if c.auth != nil {
 		sig = siphash.New(c.auth)
+		c.conn.Write([]byte{SIG_HDR})
 		w = io.MultiWriter(c.conn, sig)
 	} else {
 		w = c.conn
@@ -91,17 +94,29 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 
 	var r io.Reader
 
-	if c.auth != nil {
-		sig = siphash.New(c.auth)
-		r = io.TeeReader(c.conn, sig)
-	} else {
-		r = c.conn
-	}
-
 	var l [8]byte
-	n, err := r.Read(l[:1])
+	n, err := c.conn.Read(l[:1])
 	if n != 1 || err != nil {
 		return nil, err
+	}
+
+	if c.auth != nil {
+		if l[0] != SIG_HDR {
+			return nil, errors.New("SIG_HDR not found")
+		}
+
+		sig = siphash.New(c.auth)
+		r = io.TeeReader(c.conn, sig)
+
+		n, err := r.Read(l[:1])
+		if n != 1 || err != nil {
+			return nil, err
+		}
+	} else {
+		if l[0] == SIG_HDR {
+			return nil, errors.New("SIG_HDR not expected")
+		}
+		r = c.conn
 	}
 
 	if l[0] != msg {
