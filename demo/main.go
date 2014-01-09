@@ -61,7 +61,10 @@ func main() {
 		} else {
 			val = []byte(arg)
 		}
-		client.Set([]byte(key), val, 0)
+		err := client.Set([]byte(key), val, 0)
+		if err != nil {
+			log.Fatal("error setting key: ", err)
+		}
 
 	case "stats":
 		r, err := client.Stats()
