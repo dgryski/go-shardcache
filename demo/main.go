@@ -49,13 +49,19 @@ func main() {
 		}
 
 	case "set":
-		arg := flag.Arg(1)
-		fname := flag.Arg(2)
-		f, err := ioutil.ReadFile(fname)
-		if err != nil {
-			log.Fatal("error reading", fname, ":", err)
+		key := flag.Arg(1)
+		arg := flag.Arg(2)
+		var val []byte
+		if arg[0] == '@' {
+			var err error
+			val, err = ioutil.ReadFile(arg[1:])
+			if err != nil {
+				log.Fatal("error reading", arg[1:], ":", err)
+			}
+		} else {
+			val = []byte(arg)
 		}
-		client.Set([]byte(arg), f, 0)
+		client.Set([]byte(key), val, 0)
 
 	case "stats":
 		r, err := client.Stats()
