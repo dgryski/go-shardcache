@@ -1,6 +1,7 @@
 package shardcache
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"encoding/binary"
 	"errors"
@@ -34,7 +35,11 @@ const (
 	MSG_RES  = 0x99
 
 	SIG_HDR = 0xF0
+
+	PROTOCOL_VERSION = 0x01
 )
+
+var MAGIC []byte = []byte{0x73, 0x68, 0x63, PROTOCOL_VERSION}
 
 type Client struct {
 	auth []byte
@@ -55,6 +60,8 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	var w io.Writer
 	var sig hash.Hash
+
+	c.conn.Write(MAGIC)
 
 	if c.auth != nil {
 		sig = siphash.New(c.auth)
@@ -98,8 +105,18 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 
 	var r io.Reader
 
+	var m [4]byte
+	n, err := c.conn.Read(m[:4])
+	if n != 4 || err != nil {
+		return nil, err
+	}
+
+	if !bytes.Equal(m[0:3], MAGIC[0:3]) {
+		return nil, errors.New("Magic doesn't match")
+	}
+
 	var l [8]byte
-	n, err := c.conn.Read(l[:1])
+	n, err = c.conn.Read(l[:1])
 	if n != 1 || err != nil {
 		return nil, err
 	}
