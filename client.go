@@ -237,17 +237,12 @@ func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, er
 
 }
 
-func (c *Client) Del(key []byte, evict bool) error {
+func (c *Client) Del(key []byte) error {
+	return c.send(MSG_DEL, key)
+}
 
-	var err error
-
-	if evict {
-		err = c.send(MSG_EVI, key)
-	} else {
-		err = c.send(MSG_DEL, key)
-	}
-
-	return err
+func (c *Client) Evict(key []byte) error {
+	return c.send(MSG_EVI, key)
 }
 
 type DirEntry struct {

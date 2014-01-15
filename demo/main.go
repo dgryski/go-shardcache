@@ -47,14 +47,14 @@ func main() {
 
 	case "del":
 		arg := flag.Arg(1)
-		err := client.Del([]byte(arg), false)
+		err := client.Del([]byte(arg))
 		if err != nil {
 			log.Fatal("error deleting: ", err)
 		}
 
 	case "evict":
 		arg := flag.Arg(1)
-		err := client.Del([]byte(arg), true)
+		err := client.Evict([]byte(arg))
 		if err != nil {
 			log.Fatal("error evicting: ", err)
 		}
