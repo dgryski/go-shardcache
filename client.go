@@ -14,10 +14,14 @@ import (
 )
 
 const (
-	MSG_GET byte = 0x01
-	MSG_SET      = 0x02
-	MSG_DEL      = 0x03
-	MSG_EVI      = 0x04
+	MSG_GET        byte = 0x01
+	MSG_SET             = 0x02
+	MSG_DEL             = 0x03
+	MSG_EVI             = 0x04
+	MSG_GET_ASYNC       = 0x05
+	MSG_GET_OFFSET      = 0x06
+	MSG_ADD             = 0x07
+	MSG_TOUCH           = 0x08
 
 	MSG_CHK = 0x31
 	MSG_STS = 0x32
@@ -159,25 +163,78 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 	return response, err
 }
 
-func (c *Client) Set(key, value []byte, expire uint32) error {
+func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, error) {
 
-	var err error
+	var b [8]byte
+	binary.BigEndian.PutUint32(b[:], offset)
+	binary.BigEndian.PutUint32(b[4:], length)
 
-	if expire == 0 {
-		err = c.send(MSG_SET, key, value)
-	} else {
-		var expBytes [4]byte
-		binary.BigEndian.PutUint32(expBytes[:], expire)
-		err = c.send(MSG_SET, key, value, expBytes[:])
+	msg := append(key, b[:]...)
+
+	err := c.send(MSG_GET_OFFSET, msg)
+
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := c.readResponse(MSG_RES)
 
-	if len(response) != 2 || response[0] != 'O' || response[1] != 'K' {
+	return response, err
+}
+
+func (c *Client) Touch(key []byte) ([]byte, error) {
+
+	err := c.send(MSG_TOUCH, key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := c.readResponse(MSG_RES)
+
+	return response, err
+}
+
+func (c *Client) Set(key, value []byte, expire uint32) error {
+	resp, err := c.set(key, value, expire, MSG_SET)
+
+	if len(resp) != 2 || resp[0] != 'O' || resp[1] != 'K' {
 		return errors.New("bad set response")
 	}
 
 	return err
+}
+
+func (c *Client) Add(key, value []byte, expire uint32) (existed bool, err error) {
+	resp, err := c.set(key, value, expire, MSG_ADD)
+
+	switch string(resp) {
+	case "YES":
+		return true, nil
+	case "NO":
+		return false, nil
+	case "ERR":
+		return false, errors.New("error during add")
+	}
+	return false, errors.New("unknown add response")
+}
+
+func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, error) {
+
+	var err error
+
+	if expire == 0 {
+		err = c.send(msgbyte, key, value)
+	} else {
+		var expBytes [4]byte
+		binary.BigEndian.PutUint32(expBytes[:], expire)
+		err = c.send(msgbyte, key, value, expBytes[:])
+	}
+
+	response, err := c.readResponse(MSG_RES)
+
+	return response, err
+
 }
 
 func (c *Client) Del(key []byte, evict bool) error {
