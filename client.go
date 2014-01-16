@@ -204,11 +204,23 @@ func (c *Client) Touch(key []byte) ([]byte, error) {
 func (c *Client) Set(key, value []byte, expire uint32) error {
 	resp, err := c.set(key, value, expire, MSG_SET)
 
-	if len(resp) != 1 || resp[0] != MSG_OK || resp[0] == MSG_ERR {
-		return errors.New("bad set response")
+	if err != nil {
+		return err
 	}
 
-	return err
+	if len(resp) != 1 {
+		return errors.New("bad read for set response")
+
+	}
+
+	switch resp[0] {
+	case MSG_OK:
+		return nil
+	case MSG_ERR:
+		return errors.New("error during set")
+	}
+
+	return errors.New("unknown set response")
 }
 
 func (c *Client) Add(key, value []byte, expire uint32) (existed bool, err error) {
