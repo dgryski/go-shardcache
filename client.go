@@ -2,16 +2,12 @@ package shardcache
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"math"
 	"net"
-
-	"github.com/dchest/siphash"
 )
 
 const (
@@ -34,19 +30,16 @@ const (
 	MSG_RSEP = 0x80
 	MSG_RES  = 0x99
 
-	SIG_HDR = 0xF0
-
 	PROTOCOL_VERSION = 0x01
 )
 
 var MAGIC = []byte{0x73, 0x68, 0x63, PROTOCOL_VERSION}
 
 type Client struct {
-	auth []byte
 	conn net.Conn
 }
 
-func New(host string, auth []byte) (*Client, error) {
+func New(host string) (*Client, error) {
 
 	conn, err := net.Dial("tcp", host)
 
@@ -55,25 +48,15 @@ func New(host string, auth []byte) (*Client, error) {
 	}
 
 	return &Client{
-		auth: auth,
 		conn: conn,
 	}, nil
 }
 
 func (c *Client) send(msg byte, args ...[]byte) error {
 
-	var w io.Writer
-	var sig hash.Hash
+	w := c.conn
 
-	c.conn.Write(MAGIC)
-
-	if c.auth != nil {
-		sig = siphash.New(c.auth)
-		c.conn.Write([]byte{SIG_HDR})
-		w = io.MultiWriter(c.conn, sig)
-	} else {
-		w = c.conn
-	}
+	w.Write(MAGIC)
 
 	_, err := w.Write([]byte{msg})
 	if err != nil {
@@ -96,53 +79,28 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 		return err
 	}
 
-	if c.auth != nil {
-		_, err = c.conn.Write(sig.Sum(nil))
-	}
-
 	return err
 }
 
 func (c *Client) readResponse(msg byte) ([]byte, error) {
 
-	var sig hash.Hash
+	var l [8]byte
 
-	var r io.Reader
-
-	var m [4]byte
-	n, err := c.conn.Read(m[:4])
+	n, err := c.conn.Read(l[:4])
 	if n != 4 || err != nil {
 		return nil, err
 	}
 
-	if !bytes.Equal(m[0:3], MAGIC[0:3]) {
-		return nil, errors.New("Magic doesn't match")
+	if !bytes.Equal(l[:3], MAGIC[:3]) {
+		return nil, errors.New("bad magic")
 	}
 
-	var l [8]byte
 	n, err = c.conn.Read(l[:1])
 	if n != 1 || err != nil {
 		return nil, err
 	}
 
-	if c.auth != nil {
-		if l[0] != SIG_HDR {
-			return nil, errors.New("SIG_HDR not found")
-		}
-
-		sig = siphash.New(c.auth)
-		r = io.TeeReader(c.conn, sig)
-
-		n, err := r.Read(l[:1])
-		if n != 1 || err != nil {
-			return nil, err
-		}
-	} else {
-		if l[0] == SIG_HDR {
-			return nil, errors.New("SIG_HDR not expected")
-		}
-		r = c.conn
-	}
+	r := c.conn
 
 	if l[0] != msg {
 		return nil, errors.New("bad response byte")
@@ -156,16 +114,6 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 	r.Read(l[:1])
 	if l[0] != MSG_EOM {
 		return nil, errors.New("bad EOM")
-	}
-
-	if c.auth != nil {
-		// read signature
-		c.conn.Read(l[:])
-		sum := sig.Sum(nil)
-
-		if !hmac.Equal(sum, l[:]) {
-			return nil, errors.New("bad signature")
-		}
 	}
 
 	return response, nil

@@ -13,17 +13,9 @@ import (
 func main() {
 
 	host := flag.String("h", "localhost:8080", "shardcache host")
-	secret := flag.String("auth", "", "shardcache auth secret")
 	flag.Parse()
 
-	var auth []byte
-
-	if *secret != "" {
-		auth = make([]byte, 16)
-		copy(auth[:], *secret)
-	}
-
-	client, err := shardcache.New(*host, auth)
+	client, err := shardcache.New(*host)
 
 	if err != nil {
 		log.Fatal("unable to create client:", err)
