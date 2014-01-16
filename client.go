@@ -56,30 +56,54 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	w := c.conn
 
-	w.Write(MAGIC)
-
-	_, err := w.Write([]byte{msg})
+	n, err := w.Write(MAGIC)
 	if err != nil {
 		return err
+	}
+
+	if n != len(MAGIC) {
+		return errors.New("short write for magic")
+	}
+
+	n, err = w.Write([]byte{msg})
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("short write for msg byte")
 	}
 
 	needSep := false
 
 	for _, a := range args {
 		if needSep {
-			w.Write([]byte{MSG_RSEP})
+			n, err := w.Write([]byte{MSG_RSEP})
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return errors.New("short write for record Separator")
+			}
+
 		}
-		writeRecord(w, a)
+		err := writeRecord(w, a)
+		if err != nil {
+			return err
+		}
 		needSep = true
 	}
 
-	_, err = w.Write([]byte{MSG_EOM})
+	n, err = w.Write([]byte{MSG_EOM})
 
 	if err != nil {
 		return err
 	}
 
-	return err
+	if n != 1 {
+		return errors.New("short write for end-of-msg byte")
+	}
+
+	return nil
 }
 
 func (c *Client) readResponse(msg byte) ([]byte, error) {
@@ -111,7 +135,14 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 		return nil, fmt.Errorf("readRecord: %s", err)
 	}
 
-	r.Read(l[:1])
+	n, err = r.Read(l[:1])
+	if err != nil {
+		return nil, err
+	}
+	if n != 1 {
+		return nil, errors.New("short read for end of message")
+	}
+
 	if l[0] != MSG_EOM {
 		return nil, errors.New("bad EOM")
 	}
@@ -253,14 +284,17 @@ func (c *Client) Index() ([]DirEntry, error) {
 
 func (c *Client) Stats() ([]byte, error) {
 
-	c.send(MSG_STS, nil)
+	err := c.send(MSG_STS, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	response, err := c.readResponse(MSG_RES)
 
 	return response, err
 }
 
-func writeRecord(w io.Writer, record []byte) {
+func writeRecord(w io.Writer, record []byte) error {
 	l := []byte{0, 0}
 
 	for len(record) > 0 {
@@ -273,14 +307,34 @@ func writeRecord(w io.Writer, record []byte) {
 		}
 
 		binary.BigEndian.PutUint16(l, blockSize)
-		w.Write(l)
-		w.Write(record[:blockSize])
+		n, err := w.Write(l)
+		if err != nil {
+			return err
+		}
+		if n != 2 {
+			return errors.New("short write for chunk size")
+		}
+		n, err = w.Write(record[:blockSize])
+		if err != nil {
+			return err
+		}
+		if n != int(blockSize) {
+			return errors.New("short write for chunk")
+		}
 		record = record[blockSize:]
 	}
 
 	l[0] = 0
 	l[1] = 0
-	w.Write(l)
+	n, err := w.Write(l)
+	if err != nil {
+		return err
+	}
+	if n != 2 {
+		return errors.New("short write for end of record")
+	}
+
+	return nil
 }
 
 func readRecord(r io.Reader) ([]byte, error) {
@@ -296,7 +350,13 @@ func readRecord(r io.Reader) ([]byte, error) {
 		if blockSize == 0 {
 			break
 		}
-		io.ReadFull(r, block[:blockSize])
+		n, err := io.ReadFull(r, block[:blockSize])
+		if err != nil {
+			return nil, err
+		}
+		if n != int(blockSize) {
+			return nil, errors.New("short read for chunk")
+		}
 		record = append(record, block[:blockSize]...)
 		n, err = io.ReadFull(r, l)
 	}
