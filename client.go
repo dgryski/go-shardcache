@@ -39,7 +39,7 @@ const (
 	PROTOCOL_VERSION = 0x01
 )
 
-var MAGIC []byte = []byte{0x73, 0x68, 0x63, PROTOCOL_VERSION}
+var MAGIC = []byte{0x73, 0x68, 0x63, PROTOCOL_VERSION}
 
 type Client struct {
 	auth []byte
