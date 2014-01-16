@@ -116,7 +116,9 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 
 	var l [8]byte
 
-	n, err := c.conn.Read(l[:4])
+	r := c.conn
+
+	n, err := r.Read(l[:4])
 	if n != 4 || err != nil {
 		return nil, err
 	}
@@ -125,12 +127,10 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 		return nil, errors.New("bad magic")
 	}
 
-	n, err = c.conn.Read(l[:1])
+	n, err = r.Read(l[:1])
 	if n != 1 || err != nil {
 		return nil, err
 	}
-
-	r := c.conn
 
 	if l[0] != msg {
 		return nil, errors.New("bad response byte")
