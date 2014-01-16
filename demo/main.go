@@ -23,7 +23,11 @@ func main() {
 		copy(auth[:], *secret)
 	}
 
-	client := shardcache.New(*host, auth)
+	client, err := shardcache.New(*host, auth)
+
+	if err != nil {
+		log.Fatal("unable to create client:", err)
+	}
 
 	cmd := flag.Arg(0)
 	switch cmd {

@@ -46,14 +46,18 @@ type Client struct {
 	conn net.Conn
 }
 
-func New(host string, auth []byte) *Client {
+func New(host string, auth []byte) (*Client, error) {
 
-	conn, _ := net.Dial("tcp", host)
+	conn, err := net.Dial("tcp", host)
+
+	if err != nil {
+		return nil, err
+	}
 
 	return &Client{
 		auth: auth,
 		conn: conn,
-	}
+	}, nil
 }
 
 func (c *Client) send(msg byte, args ...[]byte) error {
