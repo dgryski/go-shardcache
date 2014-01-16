@@ -30,6 +30,12 @@ const (
 	MSG_RSEP = 0x80
 	MSG_RES  = 0x99
 
+	MSG_OK     = 0x00
+	MSG_ERR    = 0xff
+	MSG_YES    = 0x01
+	MSG_NO     = 0xfe
+	MSG_EXISTS = 0x02
+
 	PROTOCOL_VERSION = 0x01
 )
 
@@ -198,7 +204,7 @@ func (c *Client) Touch(key []byte) ([]byte, error) {
 func (c *Client) Set(key, value []byte, expire uint32) error {
 	resp, err := c.set(key, value, expire, MSG_SET)
 
-	if len(resp) != 2 || resp[0] != 'O' || resp[1] != 'K' {
+	if len(resp) != 1 || resp[0] != MSG_OK || resp[0] == MSG_ERR {
 		return errors.New("bad set response")
 	}
 
@@ -208,13 +214,21 @@ func (c *Client) Set(key, value []byte, expire uint32) error {
 func (c *Client) Add(key, value []byte, expire uint32) (existed bool, err error) {
 	resp, err := c.set(key, value, expire, MSG_ADD)
 
-	switch string(resp) {
-	case "YES":
-		return true, nil
-	case "NO":
+	if err != nil {
+		return false, err
+	}
+
+	if len(resp) != 1 {
+		return false, errors.New("bad read for set response")
+	}
+
+	switch resp[0] {
+	case MSG_OK:
 		return false, nil
-	case "ERR":
+	case MSG_ERR:
 		return false, errors.New("error during add")
+	case MSG_EXISTS:
+		return true, nil
 	}
 	return false, errors.New("unknown add response")
 }
@@ -238,11 +252,47 @@ func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, er
 }
 
 func (c *Client) Del(key []byte) error {
-	return c.send(MSG_DEL, key)
+	err := c.send(MSG_DEL, key)
+	if err != nil {
+		return err
+	}
+
+	response, err := c.readResponse(MSG_RES)
+	if err != nil {
+		return err
+	}
+
+	if len(response) != 1 {
+		return errors.New("bad delete response")
+	}
+
+	if response[0] != MSG_OK || response[0] == MSG_ERR {
+		return errors.New("error during delete")
+	}
+
+	return nil
 }
 
 func (c *Client) Evict(key []byte) error {
-	return c.send(MSG_EVI, key)
+	err := c.send(MSG_EVI, key)
+	if err != nil {
+		return err
+	}
+
+	response, err := c.readResponse(MSG_RES)
+	if err != nil {
+		return err
+	}
+
+	if len(response) != 1 {
+		return errors.New("bad delete response")
+	}
+
+	if response[0] != MSG_OK || response[0] == MSG_ERR {
+		return errors.New("error during delete")
+	}
+
+	return nil
 }
 
 type DirEntry struct {
