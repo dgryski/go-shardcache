@@ -62,35 +62,23 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	w := c.conn
 
-	n, err := w.Write(MAGIC)
+	_, err := w.Write(MAGIC)
 	if err != nil {
 		return err
 	}
 
-	if n != len(MAGIC) {
-		return errors.New("short write for magic")
-	}
-
-	n, err = w.Write([]byte{msg})
+	_, err = w.Write([]byte{msg})
 	if err != nil {
 		return err
 	}
-	if n != 1 {
-		return errors.New("short write for msg byte")
-	}
-
 	needSep := false
 
 	for _, a := range args {
 		if needSep {
-			n, err := w.Write([]byte{MSG_RSEP})
+			_, err := w.Write([]byte{MSG_RSEP})
 			if err != nil {
 				return err
 			}
-			if n != 1 {
-				return errors.New("short write for record Separator")
-			}
-
 		}
 		err := writeRecord(w, a)
 		if err != nil {
@@ -99,17 +87,9 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 		needSep = true
 	}
 
-	n, err = w.Write([]byte{MSG_EOM})
+	_, err = w.Write([]byte{MSG_EOM})
 
-	if err != nil {
-		return err
-	}
-
-	if n != 1 {
-		return errors.New("short write for end-of-msg byte")
-	}
-
-	return nil
+	return err
 }
 
 func (c *Client) readResponse(msg byte) ([]byte, error) {
@@ -369,34 +349,22 @@ func writeRecord(w io.Writer, record []byte) error {
 		}
 
 		binary.BigEndian.PutUint16(l, blockSize)
-		n, err := w.Write(l)
+		_, err := w.Write(l)
 		if err != nil {
 			return err
 		}
-		if n != 2 {
-			return errors.New("short write for chunk size")
-		}
-		n, err = w.Write(record[:blockSize])
+		_, err = w.Write(record[:blockSize])
 		if err != nil {
 			return err
-		}
-		if n != int(blockSize) {
-			return errors.New("short write for chunk")
 		}
 		record = record[blockSize:]
 	}
 
 	l[0] = 0
 	l[1] = 0
-	n, err := w.Write(l)
-	if err != nil {
-		return err
-	}
-	if n != 2 {
-		return errors.New("short write for end of record")
-	}
+	_, err := w.Write(l)
 
-	return nil
+	return err
 }
 
 func readRecord(r io.Reader) ([]byte, error) {
