@@ -99,8 +99,11 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 	r := c.conn
 
 	n, err := r.Read(l[:4])
-	if n != 4 || err != nil {
+	if err != nil {
 		return nil, err
+	}
+	if n != 4 {
+		return nil, errors.New("short read for magic")
 	}
 
 	if !bytes.Equal(l[:3], MAGIC[:3]) {
@@ -108,8 +111,11 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 	}
 
 	n, err = r.Read(l[:1])
-	if n != 1 || err != nil {
+	if err != nil {
 		return nil, err
+	}
+	if n != 1 {
+		return nil, errors.New("short read for resposne byte")
 	}
 
 	if l[0] != msg {
@@ -121,10 +127,9 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 		return nil, fmt.Errorf("readRecord: %s", err)
 	}
 
-	n, err = r.Read(l[:1])
-	if err != nil {
-		return nil, err
-	}
+	// error ignored here.  If we got a single byte and it's what we expected, then we don't care about any error generated
+	n, _ = r.Read(l[:1])
+
 	if n != 1 {
 		return nil, errors.New("short read for end of message")
 	}
@@ -374,22 +379,23 @@ func readRecord(r io.Reader) ([]byte, error) {
 
 	block := make([]byte, math.MaxUint16)
 
-	n, err := io.ReadFull(r, l)
-	for n == 2 && err == nil {
+	for {
+		_, err := io.ReadFull(r, l)
+		if err != nil {
+			return nil, err
+		}
+
 		blockSize := binary.BigEndian.Uint16(l)
 		if blockSize == 0 {
 			break
 		}
-		n, err := io.ReadFull(r, block[:blockSize])
+
+		_, err = io.ReadFull(r, block[:blockSize])
 		if err != nil {
 			return nil, err
 		}
-		if n != int(blockSize) {
-			return nil, errors.New("short read for chunk")
-		}
 		record = append(record, block[:blockSize]...)
-		n, err = io.ReadFull(r, l)
 	}
 
-	return record, err
+	return record, nil
 }
