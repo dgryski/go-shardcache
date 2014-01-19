@@ -12,7 +12,7 @@ import (
 
 func main() {
 
-	host := flag.String("h", "localhost:8080", "shardcache host")
+	host := flag.String("h", "localhost:4444", "shardcache host")
 	flag.Parse()
 
 	client, err := shardcache.New(*host)
