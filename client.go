@@ -133,7 +133,6 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 
 		response = append(response, record)
 
-		// error ignored here.  If we got a single byte and it's what we expected, then we don't care about any error generated
 		n, err = r.Read(l[:1])
 
 		if n != 1 {
