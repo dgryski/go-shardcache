@@ -94,31 +94,22 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 
-	var l [8]byte
+	var l [5]byte // magic + response byte
 
 	r := c.conn
 
-	n, err := r.Read(l[:4])
+	n, err := io.ReadFull(r, l[:])
 	if err != nil {
 		return nil, err
-	}
-	if n != 4 {
-		return nil, errors.New("short read for magic")
 	}
 
 	if !bytes.Equal(l[:3], MAGIC[:3]) {
 		return nil, errors.New("bad magic")
 	}
 
-	n, err = r.Read(l[:1])
-	if err != nil {
-		return nil, err
-	}
-	if n != 1 {
-		return nil, errors.New("short read for response byte")
-	}
+	// l[3], the protocol version byte, is ignored
 
-	if l[0] != msg {
+	if l[4] != msg {
 		return nil, errors.New("bad response byte")
 	}
 
@@ -133,18 +124,21 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 
 		response = append(response, record)
 
-		n, err = r.Read(l[:1])
+		var b [1]byte
+
+		// we're only reading a single byte, we don't care about any error here
+		n, _ = r.Read(b[:])
 
 		if n != 1 {
 			return nil, errors.New("short read waiting for next record")
 		}
 
-		if l[0] == MSG_EOM {
+		if b[0] == MSG_EOM {
 			// all done
 			break
 		}
 
-		if l[0] != MSG_RSEP {
+		if b[0] != MSG_RSEP {
 			return nil, errors.New("unknown byte while looking for rsep")
 		}
 	}
