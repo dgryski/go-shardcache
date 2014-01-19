@@ -167,6 +167,23 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 	return response[0], err
 }
 
+func (c *Client) GetAsync(key []byte) ([]byte, error) {
+
+	err := c.send(MSG_GET_ASYNC, key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := c.readResponse(MSG_RES, 1)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return response[0], err
+}
+
 func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, uint32, error) {
 
 	var offs [4]byte

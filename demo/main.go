@@ -41,6 +41,14 @@ func main() {
 		}
 		os.Stdout.Write(r)
 
+	case "getasync":
+		arg := flag.Arg(1)
+		r, err := client.GetAsync([]byte(arg))
+		if err != nil {
+			log.Fatal("error fetching: ", err)
+		}
+		os.Stdout.Write(r)
+
 	case "del":
 		arg := flag.Arg(1)
 		err := client.Del([]byte(arg))
