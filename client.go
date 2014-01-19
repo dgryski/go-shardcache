@@ -92,7 +92,7 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 	return err
 }
 
-func (c *Client) readResponse(msg byte) ([]byte, error) {
+func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 
 	var l [8]byte
 
@@ -115,27 +115,43 @@ func (c *Client) readResponse(msg byte) ([]byte, error) {
 		return nil, err
 	}
 	if n != 1 {
-		return nil, errors.New("short read for resposne byte")
+		return nil, errors.New("short read for response byte")
 	}
 
 	if l[0] != msg {
 		return nil, errors.New("bad response byte")
 	}
 
-	response, err := readRecord(r)
-	if err != nil {
-		return nil, fmt.Errorf("readRecord: %s", err)
+	var response [][]byte
+
+	for {
+
+		record, err := readRecord(r)
+		if err != nil {
+			return nil, fmt.Errorf("readRecord: %s", err)
+		}
+
+		response = append(response, record)
+
+		// error ignored here.  If we got a single byte and it's what we expected, then we don't care about any error generated
+		n, err = r.Read(l[:1])
+
+		if n != 1 {
+			return nil, errors.New("short read waiting for next record")
+		}
+
+		if l[0] == MSG_EOM {
+			// all done
+			break
+		}
+
+		if l[0] != MSG_RSEP {
+			return nil, errors.New("unknown byte while looking for rsep")
+		}
 	}
 
-	// error ignored here.  If we got a single byte and it's what we expected, then we don't care about any error generated
-	n, _ = r.Read(l[:1])
-
-	if n != 1 {
-		return nil, errors.New("short read for end of message")
-	}
-
-	if l[0] != MSG_EOM {
-		return nil, errors.New("bad EOM")
+	if len(response) != records {
+		return nil, errors.New("bad number of records")
 	}
 
 	return response, nil
@@ -149,28 +165,36 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES)
-
-	return response, err
-}
-
-func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, error) {
-
-	var b [8]byte
-	binary.BigEndian.PutUint32(b[:], offset)
-	binary.BigEndian.PutUint32(b[4:], length)
-
-	msg := append(key, b[:]...)
-
-	err := c.send(MSG_GET_OFFSET, msg)
+	response, err := c.readResponse(MSG_RES, 1)
 
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES)
+	return response[0], err
+}
 
-	return response, err
+func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, error) {
+
+	var offs [4]byte
+	var l [4]byte
+
+	binary.BigEndian.PutUint32(offs[:], offset)
+	binary.BigEndian.PutUint32(l[:], length)
+
+	err := c.send(MSG_GET_OFFSET, key, offs[:], l[:])
+
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := c.readResponse(MSG_RES, 2)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return response[0], err
 }
 
 func (c *Client) Touch(key []byte) ([]byte, error) {
@@ -181,9 +205,12 @@ func (c *Client) Touch(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES)
+	response, err := c.readResponse(MSG_RES, 1)
+	if err != nil {
+		return nil, err
+	}
 
-	return response, err
+	return response[0], nil
 }
 
 func (c *Client) Set(key, value []byte, expire uint32) error {
@@ -242,10 +269,13 @@ func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, er
 		err = c.send(msgbyte, key, value, expBytes[:])
 	}
 
-	response, err := c.readResponse(MSG_RES)
+	response, err := c.readResponse(MSG_RES, 1)
 
-	return response, err
+	if err != nil {
+		return nil, err
+	}
 
+	return response[0], err
 }
 
 func (c *Client) Del(key []byte) error {
@@ -254,16 +284,16 @@ func (c *Client) Del(key []byte) error {
 		return err
 	}
 
-	response, err := c.readResponse(MSG_RES)
+	response, err := c.readResponse(MSG_RES, 1)
 	if err != nil {
 		return err
 	}
 
-	if len(response) != 1 {
+	if len(response[0]) != 1 {
 		return errors.New("bad delete response")
 	}
 
-	if response[0] != MSG_OK || response[0] == MSG_ERR {
+	if response[0][0] != MSG_OK || response[0][0] == MSG_ERR {
 		return errors.New("error during delete")
 	}
 
@@ -276,16 +306,16 @@ func (c *Client) Evict(key []byte) error {
 		return err
 	}
 
-	response, err := c.readResponse(MSG_RES)
+	response, err := c.readResponse(MSG_RES, 1)
 	if err != nil {
 		return err
 	}
 
-	if len(response) != 1 {
+	if len(response[0]) != 1 {
 		return errors.New("bad delete response")
 	}
 
-	if response[0] != MSG_OK || response[0] == MSG_ERR {
+	if response[0][0] != MSG_OK || response[0][0] == MSG_ERR {
 		return errors.New("error during delete")
 	}
 
@@ -304,10 +334,12 @@ func (c *Client) Index() ([]DirEntry, error) {
 		return nil, err
 	}
 
-	idxBuf, err := c.readResponse(MSG_IDR)
+	response, err := c.readResponse(MSG_IDR, 1)
 	if err != nil {
 		return nil, err
 	}
+
+	idxBuf := response[0]
 
 	var index []DirEntry
 
@@ -336,9 +368,12 @@ func (c *Client) Stats() ([]byte, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES)
+	response, err := c.readResponse(MSG_RES, 1)
+	if err != nil {
+		return nil, err
+	}
 
-	return response, err
+	return response[0], err
 }
 
 func writeRecord(w io.Writer, record []byte) error {
