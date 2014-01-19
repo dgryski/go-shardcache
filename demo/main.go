@@ -35,7 +35,7 @@ func main() {
 		arg := flag.Arg(1)
 		offs, _ := strconv.Atoi(flag.Arg(2))
 		length, _ := strconv.Atoi(flag.Arg(3))
-		r, err := client.GetOffset([]byte(arg), uint32(offs), uint32(length))
+		r, _, err := client.GetOffset([]byte(arg), uint32(offs), uint32(length))
 		if err != nil {
 			log.Fatal("error fetching: ", err)
 		}

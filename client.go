@@ -173,7 +173,7 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 	return response[0], err
 }
 
-func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, error) {
+func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, uint32, error) {
 
 	var offs [4]byte
 	var l [4]byte
@@ -184,16 +184,22 @@ func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, error) {
 	err := c.send(MSG_GET_OFFSET, key, offs[:], l[:])
 
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	response, err := c.readResponse(MSG_RES, 2)
 
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return response[0], err
+	if len(response[1]) != 4 {
+		return nil, 0, errors.New("bad response size for length")
+	}
+
+	remaining := binary.BigEndian.Uint32(response[1])
+
+	return response[0], remaining, err
 }
 
 func (c *Client) Touch(key []byte) ([]byte, error) {
