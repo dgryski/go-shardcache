@@ -11,40 +11,42 @@ import (
 )
 
 const (
-	MSG_GET        byte = 0x01
-	MSG_SET             = 0x02
-	MSG_DEL             = 0x03
-	MSG_EVI             = 0x04
-	MSG_GET_ASYNC       = 0x05
-	MSG_GET_OFFSET      = 0x06
-	MSG_ADD             = 0x07
-	MSG_TOUCH           = 0x08
+	msgGet       byte = 0x01
+	msgSet            = 0x02
+	msgDel            = 0x03
+	msgEvict          = 0x04
+	msgGetAsync       = 0x05
+	msgGetOffset      = 0x06
+	msgAdd            = 0x07
+	msgTouch          = 0x08
 
-	MSG_CHK = 0x31
-	MSG_STS = 0x32
+	msgCheck = 0x31
+	msgStats = 0x32
 
-	MSG_IDG = 0x41
-	MSG_IDR = 0x42
+	msgIndexGet      = 0x41
+	msgIndexResponse = 0x42
 
-	MSG_EOM  = 0x00
-	MSG_RSEP = 0x80
-	MSG_RES  = 0x99
+	msgEOM             = 0x00
+	msgRecordSeparator = 0x80
+	msgResponse        = 0x99
 
-	MSG_OK     = 0x00
-	MSG_ERR    = 0xff
-	MSG_YES    = 0x01
-	MSG_NO     = 0xfe
-	MSG_EXISTS = 0x02
-
-	PROTOCOL_VERSION = 0x01
+	msgOK     = 0x00
+	msgERR    = 0xff
+	msgYES    = 0x01
+	msgNO     = 0xfe
+	msgExists = 0x02
 )
 
-var MAGIC = []byte{0x73, 0x68, 0x63, PROTOCOL_VERSION}
+const protocolVersion = 0x01
 
+var protocolMagic = []byte{0x73, 0x68, 0x63, protocolVersion}
+
+// Client is a ShardCache client
 type Client struct {
 	conn net.Conn
 }
 
+// New returns a ShardCache client connecting to a particular host
 func New(host string) (*Client, error) {
 
 	conn, err := net.Dial("tcp", host)
@@ -62,7 +64,7 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	w := c.conn
 
-	_, err := w.Write(MAGIC)
+	_, err := w.Write(protocolMagic)
 	if err != nil {
 		return err
 	}
@@ -75,7 +77,7 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	for _, a := range args {
 		if needSep {
-			_, err := w.Write([]byte{MSG_RSEP})
+			_, err := w.Write([]byte{msgRecordSeparator})
 			if err != nil {
 				return err
 			}
@@ -87,7 +89,7 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 		needSep = true
 	}
 
-	_, err = w.Write([]byte{MSG_EOM})
+	_, err = w.Write([]byte{msgEOM})
 
 	return err
 }
@@ -103,7 +105,7 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 		return nil, err
 	}
 
-	if !bytes.Equal(l[:3], MAGIC[:3]) {
+	if !bytes.Equal(l[:3], protocolMagic[:3]) {
 		return nil, errors.New("bad magic")
 	}
 
@@ -133,12 +135,12 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 			return nil, errors.New("short read waiting for next record")
 		}
 
-		if b[0] == MSG_EOM {
+		if b[0] == msgEOM {
 			// all done
 			break
 		}
 
-		if b[0] != MSG_RSEP {
+		if b[0] != msgRecordSeparator {
 			return nil, errors.New("unknown byte while looking for rsep")
 		}
 	}
@@ -150,15 +152,16 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 	return response, nil
 }
 
+// Get returns the value for a particular key
 func (c *Client) Get(key []byte) ([]byte, error) {
 
-	err := c.send(MSG_GET, key)
+	err := c.send(msgGet, key)
 
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES, 1)
+	response, err := c.readResponse(msgResponse, 1)
 
 	if err != nil {
 		return nil, err
@@ -167,15 +170,16 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 	return response[0], err
 }
 
+// GetAsync returns the value for a particular key, but using the asynchronous interface.  The two types of Gets behave identically in the Go implementation.
 func (c *Client) GetAsync(key []byte) ([]byte, error) {
 
-	err := c.send(MSG_GET_ASYNC, key)
+	err := c.send(msgGetAsync, key)
 
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES, 1)
+	response, err := c.readResponse(msgResponse, 1)
 
 	if err != nil {
 		return nil, err
@@ -184,6 +188,7 @@ func (c *Client) GetAsync(key []byte) ([]byte, error) {
 	return response[0], err
 }
 
+// GetOffset returns a partial value for a key.
 func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, uint32, error) {
 
 	var offs [4]byte
@@ -192,13 +197,13 @@ func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, uint32, e
 	binary.BigEndian.PutUint32(offs[:], offset)
 	binary.BigEndian.PutUint32(l[:], length)
 
-	err := c.send(MSG_GET_OFFSET, key, offs[:], l[:])
+	err := c.send(msgGetOffset, key, offs[:], l[:])
 
 	if err != nil {
 		return nil, 0, err
 	}
 
-	response, err := c.readResponse(MSG_RES, 2)
+	response, err := c.readResponse(msgResponse, 2)
 
 	if err != nil {
 		return nil, 0, err
@@ -213,15 +218,16 @@ func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, uint32, e
 	return response[0], remaining, err
 }
 
+// Touch instructs the cache to load/refresh the specified key from the storage backend.
 func (c *Client) Touch(key []byte) ([]byte, error) {
 
-	err := c.send(MSG_TOUCH, key)
+	err := c.send(msgTouch, key)
 
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES, 1)
+	response, err := c.readResponse(msgResponse, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -229,8 +235,9 @@ func (c *Client) Touch(key []byte) ([]byte, error) {
 	return response[0], nil
 }
 
+// Set sets the value of a key, with an optional expiration time (as a unix timestamp.)
 func (c *Client) Set(key, value []byte, expire uint32) error {
-	resp, err := c.set(key, value, expire, MSG_SET)
+	resp, err := c.set(key, value, expire, msgSet)
 
 	if err != nil {
 		return err
@@ -242,17 +249,18 @@ func (c *Client) Set(key, value []byte, expire uint32) error {
 	}
 
 	switch resp[0] {
-	case MSG_OK:
+	case msgOK:
 		return nil
-	case MSG_ERR:
+	case msgERR:
 		return errors.New("error during set")
 	}
 
 	return errors.New("unknown set response")
 }
 
+// Add sets the value of a key, with an optional expiration time.  This call returns a boolean indicating if the key already exists on the server.
 func (c *Client) Add(key, value []byte, expire uint32) (existed bool, err error) {
-	resp, err := c.set(key, value, expire, MSG_ADD)
+	resp, err := c.set(key, value, expire, msgAdd)
 
 	if err != nil {
 		return false, err
@@ -263,11 +271,11 @@ func (c *Client) Add(key, value []byte, expire uint32) (existed bool, err error)
 	}
 
 	switch resp[0] {
-	case MSG_OK:
+	case msgOK:
 		return false, nil
-	case MSG_ERR:
+	case msgERR:
 		return false, errors.New("error during add")
-	case MSG_EXISTS:
+	case msgExists:
 		return true, nil
 	}
 	return false, errors.New("unknown add response")
@@ -285,7 +293,7 @@ func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, er
 		err = c.send(msgbyte, key, value, expBytes[:])
 	}
 
-	response, err := c.readResponse(MSG_RES, 1)
+	response, err := c.readResponse(msgResponse, 1)
 
 	if err != nil {
 		return nil, err
@@ -294,13 +302,14 @@ func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, er
 	return response[0], err
 }
 
+// Del deletes the specified key from the cache
 func (c *Client) Del(key []byte) error {
-	err := c.send(MSG_DEL, key)
+	err := c.send(msgDel, key)
 	if err != nil {
 		return err
 	}
 
-	response, err := c.readResponse(MSG_RES, 1)
+	response, err := c.readResponse(msgResponse, 1)
 	if err != nil {
 		return err
 	}
@@ -309,20 +318,21 @@ func (c *Client) Del(key []byte) error {
 		return errors.New("bad delete response")
 	}
 
-	if response[0][0] != MSG_OK || response[0][0] == MSG_ERR {
+	if response[0][0] != msgOK || response[0][0] == msgERR {
 		return errors.New("error during delete")
 	}
 
 	return nil
 }
 
+// Evict deletes the specified key from the cache and also the shadow cache.
 func (c *Client) Evict(key []byte) error {
-	err := c.send(MSG_EVI, key)
+	err := c.send(msgEvict, key)
 	if err != nil {
 		return err
 	}
 
-	response, err := c.readResponse(MSG_RES, 1)
+	response, err := c.readResponse(msgResponse, 1)
 	if err != nil {
 		return err
 	}
@@ -331,26 +341,28 @@ func (c *Client) Evict(key []byte) error {
 		return errors.New("bad delete response")
 	}
 
-	if response[0][0] != MSG_OK || response[0][0] == MSG_ERR {
+	if response[0][0] != msgOK || response[0][0] == msgERR {
 		return errors.New("error during delete")
 	}
 
 	return nil
 }
 
+// DirEntry is information about a single item in the cache
 type DirEntry struct {
 	Key       []byte
 	ValueSize int
 }
 
+// Index returns the list of items currently in the cache
 func (c *Client) Index() ([]DirEntry, error) {
 
-	err := c.send(MSG_IDG, nil)
+	err := c.send(msgIndexGet, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_IDR, 1)
+	response, err := c.readResponse(msgIndexResponse, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -377,14 +389,15 @@ func (c *Client) Index() ([]DirEntry, error) {
 	return index, nil
 }
 
+// Stats returns statistics about the shardcache instance
 func (c *Client) Stats() ([]byte, error) {
 
-	err := c.send(MSG_STS, nil)
+	err := c.send(msgStats, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := c.readResponse(MSG_RES, 1)
+	response, err := c.readResponse(msgResponse, 1)
 	if err != nil {
 		return nil, err
 	}
