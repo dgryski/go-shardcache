@@ -43,6 +43,7 @@ var protocolMagic = []byte{0x73, 0x68, 0x63, protocolVersion}
 
 // Client is a ShardCache client
 type Client struct {
+	host string
 	conn net.Conn
 }
 
@@ -56,8 +57,19 @@ func New(host string) (*Client, error) {
 	}
 
 	return &Client{
+		host: host,
 		conn: conn,
 	}, nil
+}
+
+// Reconnect to the shardcache server
+func (c *Client) Reconnect() error {
+	c.conn.Close()
+
+	var err error
+	c.conn, err = net.Dial("tcp", c.host)
+
+	return err
 }
 
 func (c *Client) send(msg byte, args ...[]byte) error {
