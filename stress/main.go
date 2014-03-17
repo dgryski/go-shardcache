@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,9 @@ func main() {
 
 	flag.Parse()
 
+	hosts := strings.Split(*host, ",")
+	nhosts := len(hosts)
+
 	var keys [][]byte
 
 	for i := int64(0); i < int64(*nkey); i++ {
@@ -36,7 +40,7 @@ func main() {
 	val := new(uint64)
 
 	// make sure our keys exist
-	client, _ := shardcache.New(*host)
+	client, _ := shardcache.New(hosts[0])
 	for _, k := range keys {
 		if *verbose {
 			log.Println("init key", k)
@@ -47,10 +51,14 @@ func main() {
 	for i := 0; i < *clients; i++ {
 
 		go func() {
-			client, err := shardcache.New(*host)
+			var clients []*shardcache.Client
+			for _, h := range hosts {
+				client, err := shardcache.New(h)
 
-			if err != nil {
-				log.Fatal("unable to create client:", err)
+				if err != nil {
+					log.Fatal("unable to create client for %s:", host, err)
+				}
+				clients = append(clients, client)
 			}
 
 			rnd := rand.New(rand.NewSource(time.Now().UnixNano() + rand.Int63()))
@@ -58,20 +66,31 @@ func main() {
 			for !done {
 				key := keys[rnd.Intn(*nkey)]
 
-				if *verbose {
-					log.Println("key=", key)
-				}
+				clientNumber := rnd.Intn(nhosts)
+				client := clients[clientNumber]
 
 				if rnd.Intn(100) < *write {
+					if *verbose {
+						log.Println("SET client=", hosts[clientNumber], "key=", key)
+					}
+
 					var v [16]byte
 					vint := atomic.AddUint64(val, 1)
 					binary.BigEndian.PutUint64(v[:], vint)
 					err := client.Set(key, v[:], 0)
+
 					if err != nil {
 						log.Println("error during set: ", err)
 					}
+
 				} else {
+
+					if *verbose {
+						log.Println("GET client=", hosts[clientNumber], "key=", key)
+					}
+
 					_, err := client.Get(key)
+
 					if err != nil {
 						log.Println("error during get: ", err)
 					}
