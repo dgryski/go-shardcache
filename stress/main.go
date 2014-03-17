@@ -1,13 +1,13 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"log"
-
-	"encoding/binary"
 	"math/rand"
 	"sync/atomic"
 	"time"
+
 	"github.com/dgryski/go-shardcache"
 )
 
