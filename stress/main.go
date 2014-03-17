@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"math/rand"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -16,17 +17,33 @@ func main() {
 	host := flag.String("h", "localhost:4444", "shardcache host")
 	clients := flag.Int("c", 10, "number of concurrent clients")
 	write := flag.Int("w", 50, "percentage of calls which should be writes")
-	keystr := flag.String("k", "stress", "key to write to")
+	keystr := flag.String("k", "stress", "basename key to write to")
+	nkey := flag.Int("nk", 10, "number of keys to set/get")
+	verbose := flag.Bool("v", false, "verbose logging")
 
 	flag.Parse()
 
-	key := []byte(*keystr)
+	var keys [][]byte
+
+	for i := int64(0); i < int64(*nkey); i++ {
+		keys = append(keys, strconv.AppendInt([]byte(*keystr), i, 10))
+	}
+
+	if *verbose {
+		log.Println("keys=", keys)
+	}
+
 	val := new(uint64)
 	quit := make(chan struct{})
 
-	// make sure our key exists
+	// make sure our keys exist
 	client, _ := shardcache.New(*host)
-	client.Set(key, []byte("000000000000"), 0)
+	for _, k := range keys {
+		if *verbose {
+			log.Println("init key", k)
+		}
+		client.Set(k, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 0)
+	}
 
 	for i := 0; i < *clients; i++ {
 
@@ -40,6 +57,11 @@ func main() {
 			rnd := rand.New(rand.NewSource(time.Now().UnixNano() + rand.Int63()))
 			done := false
 			for !done {
+				key := keys[rnd.Intn(*nkey)]
+
+				if *verbose {
+					log.Println("key=", key)
+				}
 
 				if rnd.Intn(100) < *write {
 					var v [16]byte
