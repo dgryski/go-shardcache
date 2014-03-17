@@ -34,7 +34,6 @@ func main() {
 	}
 
 	val := new(uint64)
-	quit := make(chan struct{})
 
 	// make sure our keys exist
 	client, _ := shardcache.New(*host)
@@ -76,13 +75,6 @@ func main() {
 					if err != nil {
 						log.Println("error during get: ", err)
 					}
-				}
-
-				select {
-				case <-quit:
-					done = true
-				default:
-
 				}
 			}
 		}()
