@@ -40,7 +40,10 @@ func main() {
 	val := new(uint64)
 
 	// make sure our keys exist
-	client, _ := shardcache.New(hosts[0])
+	client, err := shardcache.New(hosts[0])
+	if err != nil {
+		log.Fatal("unable to contact ", hosts[0], ": ", err)
+	}
 	for _, k := range keys {
 		if *verbose {
 			log.Println("init key", k)
