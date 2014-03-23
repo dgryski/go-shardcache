@@ -59,7 +59,7 @@ func main() {
 				client, err := shardcache.New(h)
 
 				if err != nil {
-					log.Fatal("unable to create client for %s:", h, err)
+					log.Fatal("unable to create client for host ", h, ": ", err)
 				}
 				clients = append(clients, client)
 			}
