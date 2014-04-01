@@ -21,6 +21,8 @@ func main() {
 	keystr := flag.String("k", "stress", "basename key to write to")
 	nkey := flag.Int("nk", 10, "number of keys to set/get")
 	verbose := flag.Bool("v", false, "verbose logging")
+	deletekeys := flag.Bool("d", false, "delete keys instead of writing")
+	getIndex := flag.Bool("idx", false, "query shardcache for keys to use instead of generating random keys")
 
 	flag.Parse()
 
@@ -29,27 +31,55 @@ func main() {
 
 	var keys [][]byte
 
-	for i := int64(0); i < int64(*nkey); i++ {
-		keys = append(keys, strconv.AppendInt([]byte(*keystr), i, 10))
-	}
-
-	if *verbose {
-		log.Println("keys=", keys)
-	}
-
-	val := new(uint64)
-
-	// make sure our keys exist
 	client, err := shardcache.New(hosts[0])
 	if err != nil {
 		log.Fatal("unable to contact ", hosts[0], ": ", err)
 	}
-	for _, k := range keys {
-		if *verbose {
-			log.Println("init key", k)
+
+	if *getIndex {
+
+		directory, err := client.Index()
+
+		if err != nil {
+			log.Fatal("failed to fetch index: ", err)
 		}
-		client.Set(k, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 0)
+
+		var k [][]byte
+
+		for _, v := range directory {
+			k = append(k, v.Key)
+		}
+
+		if *nkey == 0 {
+			*nkey = len(k)
+			keys = k
+		} else {
+
+			if *nkey < len(k) {
+				*nkey = len(k)
+			}
+
+			for _, v := range rand.Perm(*nkey) {
+				keys = append(keys, k[v])
+			}
+		}
+
+	} else {
+		// construct our 'random' keys
+		for i := int64(0); i < int64(*nkey); i++ {
+			keys = append(keys, strconv.AppendInt([]byte(*keystr), i, 10))
+		}
+
+		// make sure they exist
+		for _, k := range keys {
+			if *verbose {
+				log.Println("init key", k)
+			}
+			client.Set(k, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 0)
+		}
 	}
+
+	val := new(uint64)
 
 	for i := 0; i < *clients; i++ {
 
@@ -73,17 +103,35 @@ func main() {
 				client := clients[clientNumber]
 
 				if rnd.Intn(100) < *write {
-					if *verbose {
-						log.Println("SET client=", hosts[clientNumber], "key=", key)
-					}
 
-					var v [16]byte
-					vint := atomic.AddUint64(val, 1)
-					binary.BigEndian.PutUint64(v[:], vint)
-					err := client.Set(key, v[:], 0)
+					if *deletekeys {
 
-					if err != nil {
-						log.Println("error during set: ", err)
+						if *verbose {
+							log.Println("DEL client=", hosts[clientNumber], "key=", key)
+						}
+
+						err := client.Delete(key)
+
+						if err != nil {
+							log.Println("error during delete: ", err)
+						}
+
+					} else {
+						// set
+
+						if *verbose {
+							log.Println("SET client=", hosts[clientNumber], "key=", key)
+						}
+
+						var v [16]byte
+						vint := atomic.AddUint64(val, 1)
+						binary.BigEndian.PutUint64(v[:], vint)
+						err := client.Set(key, v[:], 0)
+
+						if err != nil {
+							log.Println("error during set: ", err)
+						}
+
 					}
 
 				} else {
