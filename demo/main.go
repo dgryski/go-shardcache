@@ -51,7 +51,7 @@ func main() {
 
 	case "del":
 		arg := flag.Arg(1)
-		err := client.Del([]byte(arg))
+		err := client.Delete([]byte(arg))
 		if err != nil {
 			log.Fatal("error deleting: ", err)
 		}

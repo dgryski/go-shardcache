@@ -314,8 +314,8 @@ func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, er
 	return response[0], err
 }
 
-// Del deletes the specified key from the cache
-func (c *Client) Del(key []byte) error {
+// Delete deletes the specified key from the cache
+func (c *Client) Delete(key []byte) error {
 	err := c.send(msgDel, key)
 	if err != nil {
 		return err
