@@ -31,7 +31,7 @@ func main() {
 
 	var keys [][]byte
 
-	client, err := shardcache.New(hosts[0])
+	client, err := shardcache.New(hosts[0], nil)
 	if err != nil {
 		log.Fatal("unable to contact ", hosts[0], ": ", err)
 	}
@@ -86,7 +86,7 @@ func main() {
 		go func() {
 			var clients []*shardcache.Client
 			for _, h := range hosts {
-				client, err := shardcache.New(h)
+				client, err := shardcache.New(h, nil)
 
 				if err != nil {
 					log.Fatal("unable to create client for host ", h, ": ", err)

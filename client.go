@@ -43,22 +43,35 @@ var protocolMagic = []byte{0x73, 0x68, 0x63, protocolVersion}
 
 // Client is a ShardCache client
 type Client struct {
-	host string
-	conn net.Conn
+	host   string
+	conn   net.Conn
+	dialer Dialer
 }
 
-// New returns a ShardCache client connecting to a particular host
-func New(host string) (*Client, error) {
+// A Dialer is a means to establish a connection.
+type Dialer interface {
+	// Dial connects to the given address
+	Dial(network, addr string) (c net.Conn, err error)
+}
 
-	conn, err := net.Dial("tcp", host)
+// New returns a ShardCache client connected to a particular host.  If dialer is nil, a default net.Dialer{} will be used.
+func New(host string, dialer Dialer) (*Client, error) {
+
+	// sensible default if none provided
+	if dialer == nil {
+		dialer = &net.Dialer{}
+	}
+
+	conn, err := dialer.Dial("tcp", host)
 
 	if err != nil {
 		return nil, err
 	}
 
 	return &Client{
-		host: host,
-		conn: conn,
+		host:   host,
+		conn:   conn,
+		dialer: dialer,
 	}, nil
 }
 
@@ -67,7 +80,7 @@ func (c *Client) Reconnect() error {
 	c.conn.Close()
 
 	var err error
-	c.conn, err = net.Dial("tcp", c.host)
+	c.conn, err = c.dialer.Dial("tcp", c.host)
 
 	return err
 }

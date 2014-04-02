@@ -15,7 +15,7 @@ func main() {
 	host := flag.String("h", "localhost:4444", "shardcache host")
 	flag.Parse()
 
-	client, err := shardcache.New(*host)
+	client, err := shardcache.New(*host, nil)
 
 	if err != nil {
 		log.Fatal("unable to create client:", err)
