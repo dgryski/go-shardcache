@@ -19,6 +19,7 @@ const (
 	msgGetOffset      = 0x06
 	msgAdd            = 0x07
 	msgTouch          = 0x08
+	msgNop            = 0x90
 
 	msgCheck = 0x31
 	msgStats = 0x32
@@ -88,6 +89,12 @@ func (c *Client) Reconnect() error {
 func (c *Client) send(msg byte, args ...[]byte) error {
 
 	w := c.conn
+
+	if _, err := w.Write([]byte{msgNop}); err != nil {
+		if err := c.Reconnect(); err != nil {
+			return err
+		}
+	}
 
 	_, err := w.Write(protocolMagic)
 	if err != nil {
