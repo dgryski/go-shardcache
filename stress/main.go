@@ -25,7 +25,7 @@ func main() {
 	keystr := flag.String("k", "stress", "basename key to write to")
 	nkey := flag.Int("nk", 10, "number of keys to set/get")
 	verbose := flag.Bool("v", false, "verbose logging")
-	deletekeys := flag.Bool("d", false, "delete keys instead of writing")
+	deletekeys := flag.Bool("del", false, "delete keys instead of writing")
 	getIndex := flag.Bool("idx", false, "query shardcache for keys to use instead of generating random keys")
 
 	flag.Parse()
