@@ -27,6 +27,7 @@ func main() {
 	verbose := flag.Bool("v", false, "verbose logging")
 	deletekeys := flag.Bool("del", false, "delete keys instead of writing")
 	getIndex := flag.Bool("idx", false, "query shardcache for keys to use instead of generating random keys")
+	timeout := flag.Duration("timeout", 0, "length of time to run")
 
 	flag.Parse()
 
@@ -191,10 +192,19 @@ func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 
-	// wait for the user to kill us
-	<-c
+	var timeoutch <-chan time.Time
 
-	log.Println("caught signal -- terminating")
+	if *timeout != 0 {
+		timeoutch = time.After(*timeout)
+	}
+
+	// wait for the user to kill us
+	select {
+	case <-c:
+		log.Println("caught signal -- terminating")
+	case <-timeoutch:
+		log.Println("timeout -- terminating")
+	}
 
 	fname := fmt.Sprintf("loadtest-%s.out", time.Now().Format("20060102150405"))
 	timingsFile, _ := os.Create(fname)
