@@ -44,6 +44,7 @@ func main() {
 	getIndex := flag.Bool("idx", false, "query shardcache for keys to use instead of generating random keys")
 	timeout := flag.Duration("timeout", 0, "length of time to run")
 	//	rate := flag.Int("rate", 0, "rate (qps)")
+	timings := flag.Bool("timings", true, "log response timing metrics")
 
 	flag.Parse()
 
@@ -189,7 +190,9 @@ func main() {
 					}
 				}
 
-				results = append(results, r)
+				if *timings {
+					results = append(results, r)
+				}
 
 				select {
 				case <-done:
@@ -220,26 +223,28 @@ func main() {
 		log.Println("timeout -- terminating")
 	}
 
-	fname := fmt.Sprintf("loadtest-%s.out", time.Now().Format("20060102150405"))
-	timingsFile, _ := os.Create(fname)
-	defer timingsFile.Close()
-
-	log.Println("writing load-test results to", fname)
+	var jenc *json.Encoder
+	if *timings {
+		fname := fmt.Sprintf("loadtest-%s.out", time.Now().Format("20060102150405"))
+		timingsFile, _ := os.Create(fname)
+		defer timingsFile.Close()
+		log.Println("writing load-test results to", fname)
+		jenc = json.NewEncoder(timingsFile)
+	}
 
 	// send quit to all children
 	close(done)
 
-	jenc := json.NewEncoder(timingsFile)
-
 	var results Results
 
-	// and read back the responses
+	// and read back the responses so the children all clean up
 	for i := 0; i < *clients; i++ {
 		results = append(results, <-resultsCh...)
 	}
 
-	sort.Sort(results)
-
-	jenc.Encode(results)
+	if *timings {
+		sort.Sort(results)
+		jenc.Encode(results)
+	}
 
 }
