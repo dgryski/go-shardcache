@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -16,6 +18,19 @@ import (
 
 	"github.com/dgryski/go-shardcache"
 )
+
+type Result struct {
+	Write    bool
+	Start    int64
+	Duration time.Duration
+	Err      error
+}
+
+type Results []Result
+
+func (r Results) Len() int           { return len(r) }
+func (r Results) Less(i, j int) bool { return r[i].Start < r[j].Start }
+func (r Results) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
 
 func main() {
 
@@ -28,6 +43,7 @@ func main() {
 	deletekeys := flag.Bool("del", false, "delete keys instead of writing")
 	getIndex := flag.Bool("idx", false, "query shardcache for keys to use instead of generating random keys")
 	timeout := flag.Duration("timeout", 0, "length of time to run")
+	//	rate := flag.Int("rate", 0, "rate (qps)")
 
 	flag.Parse()
 
@@ -42,6 +58,8 @@ func main() {
 	}
 
 	if *getIndex {
+
+		log.Println("fetching index")
 
 		directory, err := client.Index()
 
@@ -86,19 +104,14 @@ func main() {
 
 	val := new(uint64)
 
-	type resultTimings struct {
-		sets    []int
-		gets    []int
-		getErrs int
-		setErrs int
-	}
-
-	resultsCh := make(chan resultTimings)
+	resultsCh := make(chan Results)
 	done := make(chan struct{})
+
+	log.Println("starting ...")
 
 	for i := 0; i < *clients; i++ {
 
-		go func(done <-chan struct{}, resultsCh chan<- resultTimings) {
+		go func(done <-chan struct{}, resultsCh chan<- Results) {
 			var clients []*shardcache.Client
 			for _, h := range hosts {
 				client, err := shardcache.New(h, nil)
@@ -109,11 +122,7 @@ func main() {
 				clients = append(clients, client)
 			}
 
-			setTimings := make([]int, 0, 1000)
-			getTimings := make([]int, 0, 1000)
-
-			var getErrors int
-			var setErrors int
+			results := make(Results, 0, 1000)
 
 			rnd := rand.New(rand.NewSource(time.Now().UnixNano() + rand.Int63()))
 			for {
@@ -122,8 +131,11 @@ func main() {
 				clientNumber := rnd.Intn(nhosts)
 				client := clients[clientNumber]
 
+				var r Result
+
 				if rnd.Intn(100) < *write {
 
+					r.Write = true
 					if *deletekeys {
 
 						if *verbose {
@@ -131,12 +143,12 @@ func main() {
 						}
 
 						t0 := time.Now()
-						err := client.Delete(key)
-						setTimings = append(setTimings, int(time.Since(t0)/time.Millisecond))
+						r.Start = t0.UnixNano()
+						r.Err = client.Delete(key)
+						r.Duration = time.Since(t0)
 
-						if err != nil {
-							setErrors++
-							log.Println("error during delete: ", err)
+						if r.Err != nil {
+							log.Println("error during delete: ", r.Err)
 						}
 
 					} else {
@@ -151,12 +163,12 @@ func main() {
 						binary.BigEndian.PutUint64(v[:], vint)
 
 						t0 := time.Now()
-						err := client.Set(key, v[:], 0)
-						setTimings = append(setTimings, int(time.Since(t0)/time.Millisecond))
+						r.Start = t0.UnixNano()
+						r.Err = client.Set(key, v[:], 0)
+						r.Duration = time.Since(t0)
 
-						if err != nil {
-							setErrors++
-							log.Println("error during set: ", err)
+						if r.Err != nil {
+							log.Println("error during set: ", r.Err)
 						}
 
 					}
@@ -168,19 +180,21 @@ func main() {
 					}
 
 					t0 := time.Now()
-					_, err := client.Get(key)
-					getTimings = append(getTimings, int(time.Since(t0)/time.Millisecond))
+					r.Start = t0.UnixNano()
+					_, r.Err = client.Get(key)
+					r.Duration = time.Since(t0)
 
-					if err != nil {
-						getErrors++
-						log.Println("error during get: ", err)
+					if r.Err != nil {
+						log.Println("error during get: ", r.Err)
 					}
 				}
+
+				results = append(results, r)
 
 				select {
 				case <-done:
 					// the channel has been closed -- this is the shutdown signal
-					resultsCh <- resultTimings{sets: setTimings, gets: getTimings, setErrs: setErrors, getErrs: getErrors}
+					resultsCh <- results
 					return
 				default:
 
@@ -215,27 +229,17 @@ func main() {
 	// send quit to all children
 	close(done)
 
+	jenc := json.NewEncoder(timingsFile)
+
+	var results Results
+
 	// and read back the responses
 	for i := 0; i < *clients; i++ {
-
-		r := <-resultsCh
-
-		for _, t := range r.gets {
-			fmt.Fprintln(timingsFile, "get:", t)
-		}
-
-		for _, t := range r.sets {
-			fmt.Fprintln(timingsFile, "set:", t)
-		}
-
-		if r.setErrs != 0 {
-			fmt.Fprintln(timingsFile, "serr: ", r.setErrs)
-		}
-
-		if r.getErrs != 0 {
-			fmt.Fprintln(timingsFile, "gerr: ", r.getErrs)
-		}
-
+		results = append(results, <-resultsCh...)
 	}
+
+	sort.Sort(results)
+
+	jenc.Encode(results)
 
 }
