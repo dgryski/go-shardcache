@@ -86,6 +86,11 @@ func (c *Client) Reconnect() error {
 	return err
 }
 
+// Close shuts down the connection to the shardcache server
+func (c *Client) Close() error {
+	return c.conn.Close()
+}
+
 func (c *Client) send(msg byte, args ...[]byte) error {
 
 	w := c.conn
