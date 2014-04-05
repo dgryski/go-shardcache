@@ -140,61 +140,7 @@ func main() {
 
 					var r Result
 
-					if rnd.Intn(100) < *write {
-
-						r.Write = true
-						if *deletekeys {
-
-							if *verbose {
-								log.Println("DEL client=", hosts[clientNumber], "key=", key)
-							}
-
-							t0 := time.Now()
-							r.Start = t0.UnixNano()
-							r.Err = client.Delete(key)
-							r.Duration = time.Since(t0)
-
-							if r.Err != nil {
-								log.Println("error during delete: ", r.Err)
-							}
-
-						} else {
-							// set
-
-							if *verbose {
-								log.Println("SET client=", hosts[clientNumber], "key=", key)
-							}
-
-							var v [16]byte
-							vint := atomic.AddUint64(val, 1)
-							binary.BigEndian.PutUint64(v[:], vint)
-
-							t0 := time.Now()
-							r.Start = t0.UnixNano()
-							r.Err = client.Set(key, v[:], 0)
-							r.Duration = time.Since(t0)
-
-							if r.Err != nil {
-								log.Println("error during set: ", r.Err)
-							}
-
-						}
-
-					} else {
-
-						if *verbose {
-							log.Println("GET client=", hosts[clientNumber], "key=", key)
-						}
-
-						t0 := time.Now()
-						r.Start = t0.UnixNano()
-						_, r.Err = client.Get(key)
-						r.Duration = time.Since(t0)
-
-						if r.Err != nil {
-							log.Println("error during get: ", r.Err)
-						}
-					}
+					run(&r, client, rnd, *write, *deletekeys, key, val)
 
 					if *timings {
 						results = append(results, r)
@@ -249,61 +195,7 @@ func main() {
 						return
 					}
 
-					if rnd.Intn(100) < *write {
-
-						r.Write = true
-						if *deletekeys {
-
-							if *verbose {
-								log.Println("DEL client=", host, "key=", key)
-							}
-
-							t0 := time.Now()
-							r.Start = t0.UnixNano()
-							r.Err = client.Delete(key)
-							r.Duration = time.Since(t0)
-
-							if r.Err != nil {
-								log.Println("error during delete: ", r.Err)
-							}
-
-						} else {
-							// set
-
-							if *verbose {
-								log.Println("SET client=", host, "key=", key)
-							}
-
-							var v [16]byte
-							vint := atomic.AddUint64(val, 1)
-							binary.BigEndian.PutUint64(v[:], vint)
-
-							t0 := time.Now()
-							r.Start = t0.UnixNano()
-							r.Err = client.Set(key, v[:], 0)
-							r.Duration = time.Since(t0)
-
-							if r.Err != nil {
-								log.Println("error during set: ", r.Err)
-							}
-
-						}
-
-					} else {
-
-						if *verbose {
-							log.Println("GET client=", host, "key=", key)
-						}
-
-						t0 := time.Now()
-						r.Start = t0.UnixNano()
-						_, r.Err = client.Get(key)
-						r.Duration = time.Since(t0)
-
-						if r.Err != nil {
-							log.Println("error during get: ", r.Err)
-						}
-					}
+					run(&r, client, rnd, *write, *deletekeys, key, val)
 
 					client.Close()
 
@@ -389,4 +281,49 @@ func main() {
 		jenc.Encode(results)
 	}
 
+}
+
+func run(r *Result, client *shardcache.Client, rnd *rand.Rand, writepct int, deletekeys bool, key []byte, val *uint64) {
+
+	if rnd.Intn(100) < writepct {
+
+		r.Write = true
+		if deletekeys {
+
+			t0 := time.Now()
+			r.Start = t0.UnixNano()
+			r.Err = client.Delete(key)
+			r.Duration = time.Since(t0)
+
+			if r.Err != nil {
+				log.Println("error during delete: ", r.Err)
+			}
+
+		} else {
+			// set
+			var v [16]byte
+			vint := atomic.AddUint64(val, 1)
+			binary.BigEndian.PutUint64(v[:], vint)
+
+			t0 := time.Now()
+			r.Start = t0.UnixNano()
+			r.Err = client.Set(key, v[:], 0)
+			r.Duration = time.Since(t0)
+
+			if r.Err != nil {
+				log.Println("error during set: ", r.Err)
+			}
+
+		}
+
+	} else {
+		t0 := time.Now()
+		r.Start = t0.UnixNano()
+		_, r.Err = client.Get(key)
+		r.Duration = time.Since(t0)
+
+		if r.Err != nil {
+			log.Println("error during get: ", r.Err)
+		}
+	}
 }
