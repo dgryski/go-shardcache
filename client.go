@@ -1,3 +1,4 @@
+// Package shardcache is a client library for servers built with https://github.com/xant/libshardcache
 package shardcache
 
 import (
