@@ -97,42 +97,34 @@ func (c *Client) Close() error {
 
 func (c *Client) send(msg byte, args ...[]byte) error {
 
-	w := c.conn
+	w := &bytes.Buffer{}
 
 	if c.EnableHealthCheck {
-		if _, err := w.Write([]byte{msgNop}); err != nil {
+		if _, err := c.conn.Write([]byte{msgNop}); err != nil {
 			if err := c.Reconnect(); err != nil {
 				return err
 			}
 		}
 	}
 
-	_, err := w.Write(protocolMagic)
-	if err != nil {
-		return err
-	}
+	// error checks here on w.Write() are ignored because bytes.Buffer.Write always succeeds (or panics).
 
-	_, err = w.Write([]byte{msg})
-	if err != nil {
-		return err
-	}
+	w.Write(protocolMagic)
+	w.WriteByte(msg)
+
 	needSep := false
 
 	for _, a := range args {
 		if needSep {
-			_, err := w.Write([]byte{msgRecordSeparator})
-			if err != nil {
-				return err
-			}
+			w.WriteByte(msgRecordSeparator)
 		}
-		err := writeRecord(w, a)
-		if err != nil {
-			return err
-		}
+		writeRecord(w, a)
 		needSep = true
 	}
 
-	_, err = w.Write([]byte{msgEOM})
+	w.WriteByte(msgEOM)
+
+	_, err := c.conn.Write(w.Bytes())
 
 	return err
 }
