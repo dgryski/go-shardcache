@@ -48,6 +48,9 @@ type Client struct {
 	host   string
 	conn   net.Conn
 	dialer Dialer
+
+	// EnableHealthCheck sends a ping before each command, and reconnects if necessary
+	EnableHealthCheck bool
 }
 
 // A Dialer is a means to establish a connection.
@@ -96,9 +99,11 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	w := c.conn
 
-	if _, err := w.Write([]byte{msgNop}); err != nil {
-		if err := c.Reconnect(); err != nil {
-			return err
+	if c.EnableHealthCheck {
+		if _, err := w.Write([]byte{msgNop}); err != nil {
+			if err := c.Reconnect(); err != nil {
+				return err
+			}
 		}
 	}
 
