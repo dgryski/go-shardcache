@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"os"
 	"os/signal"
 	"sort"
@@ -45,6 +46,7 @@ func main() {
 	timeout := flag.Duration("timeout", 0, "length of time to run")
 	rate := flag.Int("rate", 0, "rate (qps)")
 	timings := flag.Bool("timings", true, "log response timing metrics")
+	dialTimeout := flag.Duration("dial-timeout", 5*time.Second, "dialer timeout")
 
 	flag.Parse()
 
@@ -57,7 +59,8 @@ func main() {
 
 	var keys [][]byte
 
-	client, err := shardcache.New(hosts[0], nil)
+	client, err := shardcache.New(hosts[0], &net.Dialer{Timeout: *dialTimeout})
+
 	if err != nil {
 		log.Fatal("unable to contact ", hosts[0], ": ", err)
 	}
@@ -121,7 +124,7 @@ func main() {
 			go func(done <-chan struct{}, resultsCh chan<- Results) {
 				var clients []*shardcache.Client
 				for _, h := range hosts {
-					client, err := shardcache.New(h, nil)
+					client, err := shardcache.New(h, &net.Dialer{Timeout: *dialTimeout})
 
 					if err != nil {
 						log.Fatal("unable to create client for host ", h, ": ", err)
@@ -185,7 +188,7 @@ func main() {
 						Start: t0.UnixNano(),
 					}
 
-					client, err := shardcache.New(host, nil)
+					client, err := shardcache.New(host, &net.Dialer{Timeout: *dialTimeout})
 
 					if err != nil {
 						log.Println("error during connect: ", err)
