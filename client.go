@@ -99,14 +99,6 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 
 	w := &bytes.Buffer{}
 
-	if c.EnableHealthCheck {
-		if _, err := c.conn.Write([]byte{msgNop}); err != nil {
-			if err := c.Reconnect(); err != nil {
-				return err
-			}
-		}
-	}
-
 	// error checks here on w.Write() are ignored because bytes.Buffer.Write always succeeds (or panics).
 
 	w.Write(protocolMagic)
@@ -125,6 +117,11 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 	w.WriteByte(msgEOM)
 
 	_, err := c.conn.Write(w.Bytes())
+	if c.EnableHealthCheck && err != nil {
+		if err := c.Reconnect(); err != nil {
+			_, err = c.conn.Write(w.Bytes())
+		}
+	}
 
 	return err
 }
@@ -373,11 +370,11 @@ func (c *Client) Evict(key []byte) error {
 	}
 
 	if len(response[0]) != 1 {
-		return errors.New("bad delete response")
+		return errors.New("bad evict response")
 	}
 
 	if response[0][0] != msgOK || response[0][0] == msgERR {
-		return errors.New("error during delete")
+		return errors.New("error during evict")
 	}
 
 	return nil
