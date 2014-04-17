@@ -167,7 +167,7 @@ func main() {
 
 		localResults := make(chan Result)
 		rnd := rand.New(rand.NewSource(time.Now().UnixNano() + rand.Int63()))
-		go func() {
+		go func(done <-chan struct{}, resultsCh chan<- Results) {
 
 			for {
 
@@ -178,10 +178,11 @@ func main() {
 					return
 				}
 
+				irnd := rand.New(rand.NewSource(rnd.Int63()))
 				go func() {
-					key := keys[rnd.Intn(*nkey)]
+					key := keys[irnd.Intn(*nkey)]
 
-					host := hosts[rnd.Intn(nhosts)]
+					host := hosts[irnd.Intn(nhosts)]
 
 					t0 := time.Now()
 					r := Result{
@@ -198,16 +199,28 @@ func main() {
 						return
 					}
 
-					run(&r, client, rnd, *write, *deletekeys, key, val)
+					finished := make(chan struct{})
+					go func(finished chan<- struct{}) {
+						run(&r, client, irnd, *write, *deletekeys, key, val)
+						finished <- struct{}{}
+					}(finished)
 
-					client.Close()
+					select {
+					case <-finished:
+						// yay
+					case <-done:
+						// asked to shutdown
+						log.Println("Interrupting client ", host, "blocked on: ", key)
+						client.Close()
+						return
+					}
 
 					localResults <- r
 
 				}()
 			}
 
-		}()
+		}(done, resultsCh)
 
 		go func() {
 
