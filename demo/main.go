@@ -25,7 +25,7 @@ func main() {
 	switch cmd {
 	case "get":
 		arg := flag.Arg(1)
-		r, err := client.Get([]byte(arg))
+		r, err := client.Get([]byte(arg), nil)
 		if err != nil {
 			log.Fatal("error fetching: ", err)
 		}
@@ -43,7 +43,7 @@ func main() {
 
 	case "getasync":
 		arg := flag.Arg(1)
-		r, err := client.GetAsync([]byte(arg))
+		r, err := client.GetAsync([]byte(arg), nil)
 		if err != nil {
 			log.Fatal("error fetching: ", err)
 		}
@@ -93,7 +93,7 @@ func main() {
 
 	case "touch":
 		arg := flag.Arg(1)
-		r, err := client.Touch([]byte(arg))
+		r, err := client.Touch([]byte(arg), nil)
 		if err != nil {
 			log.Fatal("error touching: ", err)
 		}

@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,6 +48,7 @@ func main() {
 	rate := flag.Int("rate", 0, "rate (qps)")
 	timings := flag.Bool("timings", true, "log response timing metrics")
 	dialTimeout := flag.Duration("dial-timeout", 5*time.Second, "dialer timeout")
+	memstats := flag.String("memstats", "", "log memory stats at the end")
 
 	flag.Parse()
 
@@ -143,7 +145,9 @@ func main() {
 
 					var r Result
 
-					run(&r, client, rnd, *write, *deletekeys, key, val)
+					doWrite := rnd.Intn(100) < *write
+
+					run(&r, client, doWrite, *deletekeys, key, val)
 
 					if *timings {
 						results = append(results, r)
@@ -181,8 +185,9 @@ func main() {
 				irnd := rand.New(rand.NewSource(rnd.Int63()))
 				go func() {
 					key := keys[irnd.Intn(*nkey)]
-
 					host := hosts[irnd.Intn(nhosts)]
+
+					doWrite := rnd.Intn(100) < *write
 
 					t0 := time.Now()
 					r := Result{
@@ -201,7 +206,7 @@ func main() {
 
 					finished := make(chan struct{})
 					go func(finished chan<- struct{}) {
-						run(&r, client, irnd, *write, *deletekeys, key, val)
+						run(&r, client, doWrite, *deletekeys, key, val)
 						finished <- struct{}{}
 					}(finished)
 
@@ -291,6 +296,12 @@ func main() {
 		results = append(results, <-resultsCh...)
 	}
 
+	if *memstats != "" {
+		f, _ := os.Create(*memstats)
+		defer f.Close()
+		pprof.WriteHeapProfile(f)
+	}
+
 	if *timings {
 		log.Println("results from ", len(results), "requests")
 		sort.Sort(results)
@@ -299,9 +310,11 @@ func main() {
 
 }
 
-func run(r *Result, client *shardcache.Client, rnd *rand.Rand, writepct int, deletekeys bool, key []byte, val *uint64) {
+func run(r *Result, client *shardcache.Client, doWrite bool, deletekeys bool, key []byte, val *uint64) {
 
-	if rnd.Intn(100) < writepct {
+	var dst [128]byte
+
+	if doWrite {
 
 		r.Write = true
 		if deletekeys {
@@ -335,7 +348,7 @@ func run(r *Result, client *shardcache.Client, rnd *rand.Rand, writepct int, del
 	} else {
 		t0 := time.Now()
 		r.Start = t0.UnixNano()
-		_, r.Err = client.Get(key)
+		_, r.Err = client.Get(key, dst[:])
 		r.Duration = time.Since(t0)
 
 		if r.Err != nil {

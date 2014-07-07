@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net"
 )
@@ -48,6 +49,8 @@ type Client struct {
 	host   string
 	conn   net.Conn
 	dialer Dialer
+
+	buffer bytes.Buffer
 
 	// EnableHealthCheck sends a ping before each command, and reconnects if necessary
 	EnableHealthCheck bool
@@ -97,7 +100,8 @@ func (c *Client) Close() error {
 
 func (c *Client) send(msg byte, args ...[]byte) error {
 
-	w := &bytes.Buffer{}
+	c.buffer.Reset()
+	w := c.buffer
 
 	// error checks here on w.Write() are ignored because bytes.Buffer.Write always succeeds (or panics).
 
@@ -110,7 +114,7 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 		if needSep {
 			w.WriteByte(msgRecordSeparator)
 		}
-		writeRecord(w, a)
+		writeRecord(&w, a)
 		needSep = true
 	}
 
@@ -126,7 +130,50 @@ func (c *Client) send(msg byte, args ...[]byte) error {
 	return err
 }
 
-func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
+func (c *Client) readResponse(msg byte, dst []byte) ([]byte, error) {
+
+	var l [5]byte // magic + response byte
+
+	r := c.conn
+
+	n, err := io.ReadFull(r, l[:])
+	if err != nil {
+		return nil, err
+	}
+
+	if !bytes.Equal(l[:3], protocolMagic[:3]) {
+		return nil, errors.New("bad magic")
+	}
+
+	// l[3], the protocol version byte, is ignored
+
+	if l[4] != msg {
+		return nil, errors.New("bad response byte")
+	}
+
+	record, err := c.readRecord(r, dst)
+	if err != nil {
+		return nil, fmt.Errorf("readRecord: %s", err)
+	}
+
+	var b [1]byte
+
+	// we're only reading a single byte, we don't care about any error here
+	n, _ = r.Read(b[:])
+
+	if n != 1 {
+		return nil, errors.New("short read waiting for next record")
+	}
+
+	if b[0] != msgEOM {
+		// not what we expected
+		return nil, errors.New("unexpected record")
+	}
+
+	return record, nil
+}
+
+func (c *Client) readResponses(msg byte, records int) ([][]byte, error) {
 
 	var l [5]byte // magic + response byte
 
@@ -151,7 +198,7 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 
 	for {
 
-		record, err := readRecord(r)
+		record, err := c.readRecord(r, nil)
 		if err != nil {
 			return nil, fmt.Errorf("readRecord: %s", err)
 		}
@@ -178,6 +225,8 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 	}
 
 	if len(response) != records {
+		log.Printf("records %+v\n", records)
+		log.Printf("response %+v\n", response)
 		return nil, errors.New("bad number of records")
 	}
 
@@ -185,7 +234,7 @@ func (c *Client) readResponse(msg byte, records int) ([][]byte, error) {
 }
 
 // Get returns the value for a particular key
-func (c *Client) Get(key []byte) ([]byte, error) {
+func (c *Client) Get(key []byte, dst []byte) ([]byte, error) {
 
 	err := c.send(msgGet, key)
 
@@ -193,17 +242,17 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(msgResponse, 1)
+	response, err := c.readResponse(msgResponse, dst)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return response[0], err
+	return response, err
 }
 
 // GetAsync returns the value for a particular key, but using the asynchronous interface.  The two types of Gets behave identically in the Go implementation.
-func (c *Client) GetAsync(key []byte) ([]byte, error) {
+func (c *Client) GetAsync(key []byte, dst []byte) ([]byte, error) {
 
 	err := c.send(msgGetAsync, key)
 
@@ -211,13 +260,13 @@ func (c *Client) GetAsync(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(msgResponse, 1)
+	response, err := c.readResponse(msgResponse, dst)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return response[0], err
+	return response, err
 }
 
 // GetOffset returns a partial value for a key.
@@ -235,7 +284,7 @@ func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, uint32, e
 		return nil, 0, err
 	}
 
-	response, err := c.readResponse(msgResponse, 2)
+	response, err := c.readResponses(msgResponse, 2)
 
 	if err != nil {
 		return nil, 0, err
@@ -251,7 +300,7 @@ func (c *Client) GetOffset(key []byte, offset, length uint32) ([]byte, uint32, e
 }
 
 // Touch instructs the cache to load/refresh the specified key from the storage backend.
-func (c *Client) Touch(key []byte) ([]byte, error) {
+func (c *Client) Touch(key []byte, dst []byte) ([]byte, error) {
 
 	err := c.send(msgTouch, key)
 
@@ -259,12 +308,12 @@ func (c *Client) Touch(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(msgResponse, 1)
+	response, err := c.readResponse(msgResponse, dst)
 	if err != nil {
 		return nil, err
 	}
 
-	return response[0], nil
+	return response, nil
 }
 
 // Set sets the value of a key, with an optional expiration time (as a unix timestamp.)
@@ -325,13 +374,16 @@ func (c *Client) set(key, value []byte, expire uint32, msgbyte byte) ([]byte, er
 		err = c.send(msgbyte, key, value, expBytes[:])
 	}
 
-	response, err := c.readResponse(msgResponse, 1)
+	c.buffer.Reset()
+	b := c.buffer.Bytes()
+
+	response, err := c.readResponse(msgResponse, b)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return response[0], err
+	return response, err
 }
 
 // Delete deletes the specified key from the cache
@@ -341,16 +393,15 @@ func (c *Client) Delete(key []byte) error {
 		return err
 	}
 
-	response, err := c.readResponse(msgResponse, 1)
+	c.buffer.Reset()
+	b := c.buffer.Bytes()
+
+	response, err := c.readResponse(msgResponse, b)
 	if err != nil {
 		return err
 	}
 
-	if len(response[0]) != 1 {
-		return errors.New("bad delete response")
-	}
-
-	if response[0][0] != msgOK || response[0][0] == msgERR {
+	if response[0] != msgOK || response[0] == msgERR {
 		return errors.New("error during delete")
 	}
 
@@ -364,16 +415,19 @@ func (c *Client) Evict(key []byte) error {
 		return err
 	}
 
-	response, err := c.readResponse(msgResponse, 1)
+	c.buffer.Reset()
+	b := c.buffer.Bytes()
+
+	response, err := c.readResponse(msgResponse, b)
 	if err != nil {
 		return err
 	}
 
-	if len(response[0]) != 1 {
+	if len(response) != 1 {
 		return errors.New("bad evict response")
 	}
 
-	if response[0][0] != msgOK || response[0][0] == msgERR {
+	if response[0] != msgOK || response[0] == msgERR {
 		return errors.New("error during evict")
 	}
 
@@ -394,12 +448,14 @@ func (c *Client) Index() ([]DirEntry, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(msgIndexResponse, 1)
+	c.buffer.Reset()
+	b := c.buffer.Bytes()
+	response, err := c.readResponse(msgIndexResponse, b)
 	if err != nil {
 		return nil, err
 	}
 
-	idxBuf := response[0]
+	idxBuf := response
 
 	var index []DirEntry
 
@@ -429,12 +485,12 @@ func (c *Client) Stats() ([]byte, error) {
 		return nil, err
 	}
 
-	response, err := c.readResponse(msgResponse, 1)
+	response, err := c.readResponse(msgResponse, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return response[0], err
+	return response, err
 }
 
 func writeRecord(w io.Writer, record []byte) error {
@@ -468,12 +524,10 @@ func writeRecord(w io.Writer, record []byte) error {
 	return err
 }
 
-func readRecord(r io.Reader) ([]byte, error) {
+func (c *Client) readRecord(r io.Reader, dst []byte) ([]byte, error) {
 	l := []byte{0, 0}
 
-	var record []byte
-
-	block := make([]byte, math.MaxUint16)
+	var block [math.MaxUint16]byte
 
 	for {
 		_, err := io.ReadFull(r, l)
@@ -490,8 +544,8 @@ func readRecord(r io.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		record = append(record, block[:blockSize]...)
+		dst = append(dst, block[:blockSize]...)
 	}
 
-	return record, nil
+	return dst, nil
 }
